@@ -11,6 +11,7 @@ import random
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import concurrent.futures
+from collections import defaultdict
 
 with open('./openai_api.key', 'r') as f:
     api_key = f.read().strip()
@@ -116,16 +117,31 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
 def agglomerative_clustering(entities, embeddings, distance_threshold):
     clustering = AgglomerativeClustering(metric='cosine', linkage='average', distance_threshold=distance_threshold, n_clusters=None)
     clustering.fit(embeddings)
-    
-    clusters = {}
-    for i in range(clustering.n_clusters_):
-        cluster_indices = np.where(clustering.labels_ == i)[0]
-        cluster_entities = [entities[idx] for idx in cluster_indices]
-        clusters[f"Cluster_{i+1}"] = cluster_entities
-        
-    logging.info(f"Clusters: {clusters}")
-    
-    return clusters
+
+    cluster_hierarchy = lambda: defaultdict(list)
+    clusters = cluster_hierarchy()
+
+    for i, entity in enumerate(entities):
+        cluster_idx = clustering.labels_[i]
+        path = []
+        parent = clusters
+        while cluster_idx >= 0:
+            cluster_name = f"Cluster_{cluster_idx + 1}"
+            path.append(cluster_name)
+            if cluster_name not in parent:
+                parent[cluster_name] = defaultdict(list)
+            parent = parent[cluster_name]
+            cluster_idx = clustering.children_[cluster_idx]
+
+        leaf_cluster = path.pop()
+        for level in path[::-1]:
+            clusters[level][leaf_cluster] = []
+        clusters[leaf_cluster].append(entity)
+
+    logging.info(f"Cluster Hierarchy: {dict(clusters)}")
+
+    return dict(clusters)
+
 
 def evaluate_threshold(entities, embeddings, threshold):
     clusters = agglomerative_clustering(entities, embeddings, threshold)
@@ -322,22 +338,32 @@ def main():
     print("Start Generating Embeddings...")
     embeddings, entity_info, entity_embeddings = generate_embeddings(args, entity_info=entity_info, entity_embeddings=entity_embeddings, dim=args.dimensions)
 
-    print("Start Finding Optimal Threshold...")
-    # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.3, max_threshold=0.9, num_thresholds=20)
-    best_threshold = 0.52
+    if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_clusters.json"):
+        print("Start Finding Optimal Threshold...")
+        # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.3, max_threshold=0.9, num_thresholds=20)
+        best_threshold = 0.52
 
-    print(f"Best Threshold: {best_threshold:.2f}")
-    print("Start Creating Seed Clusters ...")
-    seed_clusters = agglomerative_clustering(entities_text, embeddings, best_threshold)
-    print("Start Refining Clusters with LLM...")
-    refined_clusters = llm_refine_hierarchy(seed_clusters, num_threads=args.num_threads, max_entities=args.max_entities)
-    
-    print("Saving Clusters...")
-    
-    with open(f"{args.output_dir}/{args.dataset}/clusters.json", 'w') as f:
-        json.dump(refined_clusters, f, indent=4)
+        print(f"Best Threshold: {best_threshold:.2f}")
+        print("Start Creating Seed Clusters ...")
+        seed_clusters = agglomerative_clustering(entities_text, embeddings, best_threshold)
+        with open(f"{args.output_dir}/{args.dataset}/seed_cluster.json", 'w') as f:
+            json.dump(seed_clusters, f, indent=4)
+        print("Done.")
+    else:
+        print(f"Loading existing seed clusters from {args.output_dir}/{args.dataset}/seed_clusters.json...")
+        with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'r') as f:
+            seed_clusters = json.load(f)
+        print("Done.")
         
-    print("Done.")
+    # print("Start Refining Clusters with LLM...")
+    # refined_clusters = llm_refine_hierarchy(seed_clusters, num_threads=args.num_threads, max_entities=args.max_entities)
+    
+    # print("Saving Clusters...")
+    
+    # with open(f"{args.output_dir}/{args.dataset}/clusters.json", 'w') as f:
+    #     json.dump(refined_clusters, f, indent=4)
+        
+    # print("Done.")
     
 if __name__ == "__main__":
     main()
