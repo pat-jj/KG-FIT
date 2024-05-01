@@ -125,12 +125,14 @@ def agglomerative_clustering(entities, embeddings, distance_threshold):
         cluster_idx = clustering.labels_[i]
         path = []
         parent = clusters
-        while cluster_idx.any() >= 0:  # Use cluster_idx.any() instead of cluster_idx >= 0
+        while cluster_idx.any() >= 0:
             cluster_name = f"Cluster_{cluster_idx + 1}"
             path.append(cluster_name)
             if cluster_name not in parent:
                 parent[cluster_name] = defaultdict(list)
             parent = parent[cluster_name]
+            if (clustering.children_[cluster_idx] == -1).any():  # Check if any element in cluster_idx is -1
+                break
             cluster_idx = clustering.children_[cluster_idx]
 
         leaf_cluster = path.pop()
