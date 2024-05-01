@@ -11,7 +11,6 @@ import random
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import concurrent.futures
-from collections import defaultdict
 
 with open('./openai_api.key', 'r') as f:
     api_key = f.read().strip()
@@ -113,37 +112,49 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
     return np.array(embeddings), entity_info, entity_embeddings
 
+def build_hierarchy(children, n_leaves, entity_labels):
+    """
+    Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys.
+    """
+    # Initialize with leaf nodes
+    hierarchy = {f"Leaf_{i}": entity_labels[i] for i in range(n_leaves)}
+    next_cluster_id = n_leaves  # Start numbering clusters from the number of leaves
+
+    # Intermediate nodes formed from merging children
+    for i, (left, right) in enumerate(children):
+        cluster_id = f"Cluster_{next_cluster_id}"
+        hierarchy[cluster_id] = {f"Cluster_{left}": hierarchy.pop(f"Leaf_{left}" if left < n_leaves else f"Cluster_{left}"),
+                                 f"Cluster_{right}": hierarchy.pop(f"Leaf_{right}" if right < n_leaves else f"Cluster_{right}")}
+        next_cluster_id += 1
+
+    # Return the root of the hierarchy
+    return hierarchy[f"Cluster_{next_cluster_id - 1}"]
+
+def seed_hierarchy_construction(entities, embeddings, distance_threshold):
+    """
+    Function to perform agglomerative clustering and build hierarchy
+    """
+    clustering = AgglomerativeClustering(metric='cosine', linkage='average',
+                                         distance_threshold=distance_threshold, n_clusters=None)
+    clustering.fit(embeddings)
+    
+    # Get the root of the hierarchy
+    hierarchy_root = build_hierarchy(clustering.children_, len(entities), entities)
+    return hierarchy_root
 
 def agglomerative_clustering(entities, embeddings, distance_threshold):
     clustering = AgglomerativeClustering(metric='cosine', linkage='average', distance_threshold=distance_threshold, n_clusters=None)
     clustering.fit(embeddings)
-
-    cluster_hierarchy = lambda: defaultdict(list)
-    clusters = cluster_hierarchy()
-
-    for i, entity in enumerate(entities):
-        cluster_idx = clustering.labels_[i]
-        path = []
-        parent = clusters
-        while cluster_idx.any() >= 0:
-            cluster_name = f"Cluster_{cluster_idx + 1}"
-            path.append(cluster_name)
-            if cluster_name not in parent:
-                parent[cluster_name] = defaultdict(list)
-            parent = parent[cluster_name]
-            if (clustering.children_[cluster_idx] == -1).any():  # Check if any element in cluster_idx is -1
-                break
-            cluster_idx = clustering.children_[cluster_idx]
-
-        leaf_cluster = path.pop()
-        for level in path[::-1]:
-            clusters[level][leaf_cluster] = []
-        clusters[leaf_cluster].append(entity)
-
-    logging.info(f"Cluster Hierarchy: {dict(clusters)}")
-
-    return dict(clusters)
-
+    
+    clusters = {}
+    for i in range(clustering.n_clusters_):
+        cluster_indices = np.where(clustering.labels_ == i)[0]
+        cluster_entities = [entities[idx] for idx in cluster_indices]
+        clusters[f"Cluster_{i+1}"] = cluster_entities
+        
+    logging.info(f"Clusters: {clusters}")
+    
+    return clusters
 
 def evaluate_threshold(entities, embeddings, threshold):
     clusters = agglomerative_clustering(entities, embeddings, threshold)
@@ -191,81 +202,81 @@ def find_optimal_threshold(args, entities, embeddings, min_threshold=0.1, max_th
     return best_threshold, best_clusters
 
 
-def llm_refine_hierarchy(clusters, max_entities=100, num_threads=4):
-    logging.info(f"Refining clusters...")
-    logging.info(f"Current clusters: {clusters}")
-    refined_clusters = {}
+# def llm_refine_hierarchy(clusters, max_entities=100, num_threads=4):
+#     logging.info(f"Refining clusters...")
+#     logging.info(f"Current clusters: {clusters}")
+#     refined_clusters = {}
 
-    def refine_cluster(cluster_name, cluster_entities):
-        remaining_entities = set(cluster_entities)
-        sub_clusters = {}
+#     def refine_cluster(cluster_name, cluster_entities):
+#         remaining_entities = set(cluster_entities)
+#         sub_clusters = {}
 
-        while remaining_entities:
-            if len(remaining_entities) > max_entities:
-                sampled_entities = random.sample(remaining_entities, max_entities)
-            else:
-                sampled_entities = list(remaining_entities)
+#         while remaining_entities:
+#             if len(remaining_entities) > max_entities:
+#                 sampled_entities = random.sample(remaining_entities, max_entities)
+#             else:
+#                 sampled_entities = list(remaining_entities)
 
-            example_entities = ["The Godfather", "The Shawshank Redemption", "The Dark Knight", "Forrest Gump", "Inception", "The Matrix"]
-            example_cluster_name = "Movies"
-            example_suggestion_first_iteration = "Genre:\nDrama: The Godfather, The Shawshank Redemption, Forrest Gump\nAction: The Dark Knight\nScience Fiction: Inception, The Matrix"
-            example_suggestion_subsequent_iterations = "Genre:\nDrama: The Shawshank Redemption\nAction: The Dark Knight\nScience Fiction: Inception, The Matrix\n\nOther Characteristics:\nCrime: The Godfather\nPrison: The Shawshank Redemption\nSuperhero: The Dark Knight\nComedy-Drama: Forrest Gump\nMind-Bending: Inception\nDystopian Future: The Matrix"
+#             example_entities = ["The Godfather", "The Shawshank Redemption", "The Dark Knight", "Forrest Gump", "Inception", "The Matrix"]
+#             example_cluster_name = "Movies"
+#             example_suggestion_first_iteration = "Genre:\nDrama: The Godfather, The Shawshank Redemption, Forrest Gump\nAction: The Dark Knight\nScience Fiction: Inception, The Matrix"
+#             example_suggestion_subsequent_iterations = "Genre:\nDrama: The Shawshank Redemption\nAction: The Dark Knight\nScience Fiction: Inception, The Matrix\n\nOther Characteristics:\nCrime: The Godfather\nPrison: The Shawshank Redemption\nSuperhero: The Dark Knight\nComedy-Drama: Forrest Gump\nMind-Bending: Inception\nDystopian Future: The Matrix"
 
-            if not sub_clusters:
-                prompt = f"Given the following entities from the cluster '{cluster_name}':\n{', '.join(sampled_entities)}\n\nAnalyze the entities and determine if they can be grouped into distinct and meaningful sub-clusters based on their characteristics, themes, or genres. If sub-clusters can be formed, provide a clear and concise name for each sub-cluster that represents the common attribute of its entities. If the entities are already well-grouped and don't require further sub-clustering, simply provide a descriptive name for the cluster.\n\nProvide the output in the following format:\nSub-clusters:\n[Sub-cluster Name 1]:\n[Entity 1]\n[Entity 2]\n...\n\n[Sub-cluster Name 2]:\n[Entity 3]\n[Entity 4]\n...\n\nCluster Name: [Descriptive Name]\n\nExample:\nCluster: {example_cluster_name}\nEntities: {', '.join(example_entities)}\nOutput:\n{example_suggestion_first_iteration}\n\nCluster: {cluster_name}\nEntities: {', '.join(sampled_entities)}\nOutput:"
-            else:
-                prompt = f"Given the following entities from the cluster '{cluster_name}':\n{', '.join(sampled_entities)}\n\nAnd the existing sub-cluster names:\n{', '.join(sub_clusters.keys())}\n\nAnalyze the entities and classify them into the existing sub-clusters based on their characteristics, themes, or genres. If an entity doesn't fit into any existing sub-cluster, you can create a new sub-cluster for it. If the entities are already well-grouped and don't require further sub-clustering, simply provide a descriptive name for the cluster.\n\nProvide the output in the following format:\nSub-clusters:\n[Existing Sub-cluster Name 1]:\n[Entity 1]\n[Entity 2]\n...\n\n[Existing Sub-cluster Name 2]:\n[Entity 3]\n[Entity 4]\n...\n\n[New Sub-cluster Name 1]:\n[Entity 5]\n[Entity 6]\n...\n\nCluster Name: [Descriptive Name]\n\nExample:\nCluster: {example_cluster_name}\nEntities: {', '.join(example_entities)}\nExisting Sub-cluster Names: Genre, Other Characteristics\nOutput:\n{example_suggestion_subsequent_iterations}\n\nCluster: {cluster_name}\nEntities: {', '.join(sampled_entities)}\nExisting Sub-cluster Names: {', '.join(sub_clusters.keys())}\nOutput:"
+#             if not sub_clusters:
+#                 prompt = f"Given the following entities from the cluster '{cluster_name}':\n{', '.join(sampled_entities)}\n\nAnalyze the entities and determine if they can be grouped into distinct and meaningful sub-clusters based on their characteristics, themes, or genres. If sub-clusters can be formed, provide a clear and concise name for each sub-cluster that represents the common attribute of its entities. If the entities are already well-grouped and don't require further sub-clustering, simply provide a descriptive name for the cluster.\n\nProvide the output in the following format:\nSub-clusters:\n[Sub-cluster Name 1]:\n[Entity 1]\n[Entity 2]\n...\n\n[Sub-cluster Name 2]:\n[Entity 3]\n[Entity 4]\n...\n\nCluster Name: [Descriptive Name]\n\nExample:\nCluster: {example_cluster_name}\nEntities: {', '.join(example_entities)}\nOutput:\n{example_suggestion_first_iteration}\n\nCluster: {cluster_name}\nEntities: {', '.join(sampled_entities)}\nOutput:"
+#             else:
+#                 prompt = f"Given the following entities from the cluster '{cluster_name}':\n{', '.join(sampled_entities)}\n\nAnd the existing sub-cluster names:\n{', '.join(sub_clusters.keys())}\n\nAnalyze the entities and classify them into the existing sub-clusters based on their characteristics, themes, or genres. If an entity doesn't fit into any existing sub-cluster, you can create a new sub-cluster for it. If the entities are already well-grouped and don't require further sub-clustering, simply provide a descriptive name for the cluster.\n\nProvide the output in the following format:\nSub-clusters:\n[Existing Sub-cluster Name 1]:\n[Entity 1]\n[Entity 2]\n...\n\n[Existing Sub-cluster Name 2]:\n[Entity 3]\n[Entity 4]\n...\n\n[New Sub-cluster Name 1]:\n[Entity 5]\n[Entity 6]\n...\n\nCluster Name: [Descriptive Name]\n\nExample:\nCluster: {example_cluster_name}\nEntities: {', '.join(example_entities)}\nExisting Sub-cluster Names: Genre, Other Characteristics\nOutput:\n{example_suggestion_subsequent_iterations}\n\nCluster: {cluster_name}\nEntities: {', '.join(sampled_entities)}\nExisting Sub-cluster Names: {', '.join(sub_clusters.keys())}\nOutput:"
 
-            response = gpt_chat_return_response(model="gpt-3.5-turbo-0125", prompt=prompt)
-            suggestion = response.choices[0].message.content.strip()
+#             response = gpt_chat_return_response(model="gpt-3.5-turbo-0125", prompt=prompt)
+#             suggestion = response.choices[0].message.content.strip()
 
-            sub_clusters, remaining_entities = update_cluster(sub_clusters, sampled_entities, suggestion, remaining_entities)
-            logging.info(f'sub_clusters: {sub_clusters}, remaining_entities: {remaining_entities}')
+#             sub_clusters, remaining_entities = update_cluster(sub_clusters, sampled_entities, suggestion, remaining_entities)
+#             logging.info(f'sub_clusters: {sub_clusters}, remaining_entities: {remaining_entities}')
 
-        return cluster_name, sub_clusters
+#         return cluster_name, sub_clusters
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = [executor.submit(refine_cluster, cluster_name, cluster_entities) for cluster_name, cluster_entities in clusters.items()]
-        for future in concurrent.futures.as_completed(futures):
-            cluster_name, sub_clusters = future.result()
-            refined_clusters[cluster_name] = sub_clusters
+#     with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+#         futures = [executor.submit(refine_cluster, cluster_name, cluster_entities) for cluster_name, cluster_entities in clusters.items()]
+#         for future in concurrent.futures.as_completed(futures):
+#             cluster_name, sub_clusters = future.result()
+#             refined_clusters[cluster_name] = sub_clusters
 
-    return refined_clusters
+#     return refined_clusters
 
 
-def update_cluster(sub_clusters, sampled_entities, suggestion, remaining_entities):
-    suggestion_lines = suggestion.split("\n")
-    current_section = None
-    cluster_name = None
+# def update_cluster(sub_clusters, sampled_entities, suggestion, remaining_entities):
+#     suggestion_lines = suggestion.split("\n")
+#     current_section = None
+#     cluster_name = None
 
-    for line in suggestion_lines:
-        line = line.strip()
-        if not line:
-            continue
+#     for line in suggestion_lines:
+#         line = line.strip()
+#         if not line:
+#             continue
 
-        if line == "Sub-clusters:":
-            current_section = "sub_clusters"
-        elif line.startswith("Cluster Name:"):
-            current_section = "cluster_name"
-            cluster_name = line.split(":", maxsplit=1)[1].strip()
-        else:
-            if current_section == "sub_clusters":
-                if ":" in line:
-                    sub_cluster_name = line[:-1].strip()
-                    if sub_cluster_name not in sub_clusters:
-                        sub_clusters[sub_cluster_name] = []
-                else:
-                    entity = line.strip()
-                    if entity in sampled_entities:
-                        if sub_cluster_name is not None:
-                            sub_clusters[sub_cluster_name].append(entity)
-                        remaining_entities.discard(entity)
+#         if line == "Sub-clusters:":
+#             current_section = "sub_clusters"
+#         elif line.startswith("Cluster Name:"):
+#             current_section = "cluster_name"
+#             cluster_name = line.split(":", maxsplit=1)[1].strip()
+#         else:
+#             if current_section == "sub_clusters":
+#                 if ":" in line:
+#                     sub_cluster_name = line[:-1].strip()
+#                     if sub_cluster_name not in sub_clusters:
+#                         sub_clusters[sub_cluster_name] = []
+#                 else:
+#                     entity = line.strip()
+#                     if entity in sampled_entities:
+#                         if sub_cluster_name is not None:
+#                             sub_clusters[sub_cluster_name].append(entity)
+#                         remaining_entities.discard(entity)
 
-    if cluster_name is not None and not sub_clusters:
-        sub_clusters[cluster_name] = sampled_entities
-        remaining_entities -= set(sampled_entities)
+#     if cluster_name is not None and not sub_clusters:
+#         sub_clusters[cluster_name] = sampled_entities
+#         remaining_entities -= set(sampled_entities)
 
-    return sub_clusters, remaining_entities
+#     return sub_clusters, remaining_entities
 
 def read_entities(path):
     entities = []
@@ -347,10 +358,9 @@ def main():
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
-        seed_clusters = agglomerative_clustering(entities_text, embeddings, best_threshold)
-        with open(f"{args.output_dir}/{args.dataset}/seed_cluster.json", 'w') as f:
+        seed_clusters = seed_hierarchy_construction(entities_text, embeddings, best_threshold)
+        with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'w') as f:
             json.dump(seed_clusters, f, indent=4)
-        print("Done.")
     else:
         print(f"Loading existing seed clusters from {args.output_dir}/{args.dataset}/seed_clusters.json...")
         with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'r') as f:
@@ -368,4 +378,4 @@ def main():
     # print("Done.")
     
 if __name__ == "__main__":
-    main()
+    main() 
