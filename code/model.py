@@ -11,7 +11,7 @@ from tqdm import tqdm
 class LAMAKE(nn.Module):
     def __init__(self, model_name, nentity, nrelation, hidden_dim, gamma, 
                  double_entity_embedding=False, double_relation_embedding=False,
-                 entity_hierarchy=None, entity_text_embeddings=None, rho=0.5, alpha=0.5, beta=0.5, gamma_1=1.0, gamma_2=1.0):
+                 entity_hierarchy=None, entity_text_embeddings=None, rho=0.5, alpha=0.5, beta=0.5, gamma_1=1.0, gamma_2=1.0, lambda_1=1.0, lambda_2=1.0):
         super(LAMAKE, self).__init__()
         self.model_name = model_name
         self.nentity = nentity
@@ -31,14 +31,6 @@ class LAMAKE(nn.Module):
         
         self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
         self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
-        
-        # Initialize entity embeddings (Equation 6)
-        self.entity_embedding = nn.Parameter(torch.zeros(nentity, self.entity_dim))
-        nn.init.uniform_(
-            tensor=self.entity_embedding, 
-            a=-self.embedding_range.item(), 
-            b=self.embedding_range.item()
-        )
         
         # Initialize relation embeddings (Equation 7)
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
@@ -76,6 +68,8 @@ class LAMAKE(nn.Module):
         self.beta = beta    # Weight for the text embedding deviation constraint
         self.gamma_1 = gamma_1  # Weight for the parent-child constraint
         self.gamma_2 = gamma_2  # Weight for the link prediction constraint
+        self.lambda_1 = lambda_1  # Weight for the inter-cluster separation
+        self.lambda_2 = lambda_2  # Weight for the parent-child relationship preservation
         
     def forward(self, sample, mode='single'):
         if mode == 'single':
@@ -87,29 +81,48 @@ class LAMAKE(nn.Module):
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 0]).unsqueeze(1)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 2]).unsqueeze(1)
             
-            head_cluster = self.get_cluster_embedding(sample[:, 0])
-            tail_cluster = self.get_cluster_embedding(sample[:, 2])
-            
-            head_parent_cluster = self.get_parent_cluster_embedding(sample[:, 0])
-            tail_parent_cluster = self.get_parent_cluster_embedding(sample[:, 2])
-            
             # Combine entity embeddings with text embeddings and randomly initialized component 
             head_combined = self.rho * head_init + (1 - self.rho) * head_text
             tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
             
+            head_cluster = self.get_cluster_embedding(sample[:, 0], head_combined)
+            tail_cluster = self.get_cluster_embedding(sample[:, 2], tail_combined)
+            
+            head_parent_cluster = self.get_parent_cluster_embedding(sample[:, 0], head_combined)
+            tail_parent_cluster = self.get_parent_cluster_embedding(sample[:, 2], tail_combined)
+            
             head_text_dist = self.distance(head_combined, head_text)
             tail_text_dist = self.distance(tail_combined, tail_text)
             
-            head_cluster_dist = self.distance(head_combined, head_cluster)
-            tail_cluster_dist = self.distance(tail_combined, tail_cluster)
+            # Compute intra-cluster distances
+            intra_cluster_dists = []
+            for cluster_embedding in torch.cat([head_cluster, tail_cluster], dim=0):
+                cluster_entities = self.entity_hierarchy[cluster_embedding]
+                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined, tail_combined], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
+                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
+                intra_cluster_dists.append(intra_cluster_dist)
+            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
             
-            head_parent_cluster_dist = self.distance(head_cluster, head_parent_cluster)
-            tail_parent_cluster_dist = self.distance(tail_cluster, tail_parent_cluster)
+            # Compute inter-cluster distances
+            inter_cluster_dists = []
+            for i, cluster_embedding in enumerate(torch.cat([head_cluster, tail_cluster], dim=0)):
+                other_cluster_embeddings = torch.cat([head_cluster[:i], head_cluster[i+1:], tail_cluster[:i], tail_cluster[i+1:]], dim=0)
+                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
+                inter_cluster_dists.append(inter_cluster_dist)
+            inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
+            
+            # Compute parent-child distances
+            parent_child_dists = []
+            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster, tail_cluster], dim=0), torch.cat([head_parent_cluster, tail_parent_cluster], dim=0)):
+                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
+                parent_child_dists.append(parent_child_dist)
+            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
+            
+            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
             
             # Apply constraints 
-            score = - self.alpha * (head_cluster_dist + tail_cluster_dist)  # Hierarchical constraint 
+            score = - self.alpha * hierarchical_loss  # Hierarchical constraint 
             score = score - self.beta * (head_text_dist + tail_text_dist)  # Text embedding deviation constraint 
-            score = score - self.gamma_1 * (head_parent_cluster_dist + tail_parent_cluster_dist)  # Hierarchical constraint (parent-child)
             
             # Link prediction constraint (refined)
             true_triple_score = self.score_func(head_combined, relation, tail_combined)
@@ -130,27 +143,46 @@ class LAMAKE(nn.Module):
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part[:, 2]).unsqueeze(1)
             
-            head_cluster = self.get_cluster_embedding(head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            tail_cluster = self.get_cluster_embedding(tail_part[:, 2])
-            
-            head_parent_cluster = self.get_parent_cluster_embedding(head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part[:, 2])
-            
             head_combined = self.rho * head_init + (1 - self.rho) * head_text
             tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
+            
+            head_cluster = self.get_cluster_embedding(head_part.view(-1), head_combined).view(batch_size, negative_sample_size, -1)
+            tail_cluster = self.get_cluster_embedding(tail_part[:, 2], tail_combined)
+            
+            head_parent_cluster = self.get_parent_cluster_embedding(head_part.view(-1), head_combined).view(batch_size, negative_sample_size, -1)
+            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part[:, 2], tail_combined)
             
             head_text_dist = self.distance(head_combined, head_text)
             tail_text_dist = self.distance(tail_combined, tail_text)
             
-            head_cluster_dist = self.distance(head_combined, head_cluster)
-            tail_cluster_dist = self.distance(tail_combined, tail_cluster)
+            # Compute intra-cluster distances
+            intra_cluster_dists = []
+            for cluster_embedding in torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0):
+                cluster_entities = self.entity_hierarchy[cluster_embedding]
+                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined.view(-1, head_combined.size(-1)), tail_combined], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
+                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
+                intra_cluster_dists.append(intra_cluster_dist)
+            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
             
-            head_parent_cluster_dist = self.distance(head_cluster, head_parent_cluster)
-            tail_parent_cluster_dist = self.distance(tail_cluster, tail_parent_cluster)
+            # Compute inter-cluster distances
+            inter_cluster_dists = []
+            for i, cluster_embedding in enumerate(torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0)):
+                other_cluster_embeddings = torch.cat([head_cluster.view(-1, head_cluster.size(-1))[:i], head_cluster.view(-1, head_cluster.size(-1))[i+1:], tail_cluster[:i], tail_cluster[i+1:]], dim=0)
+                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
+                inter_cluster_dists.append(inter_cluster_dist)
+            inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
             
-            score = - self.alpha * (head_cluster_dist + tail_cluster_dist)
+            # Compute parent-child distances
+            parent_child_dists = []
+            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0), torch.cat([head_parent_cluster.view(-1, head_parent_cluster.size(-1)), tail_parent_cluster], dim=0)):
+                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
+                parent_child_dists.append(parent_child_dist)
+            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
+            
+            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
+            
+            score = - self.alpha * hierarchical_loss
             score = score - self.beta * (head_text_dist + tail_text_dist)
-            score = score - self.gamma_1 * (head_parent_cluster_dist + tail_parent_cluster_dist)
             
             true_triple_score = self.score_func(head_combined, relation, tail_combined)
             negative_heads = self.sample_negative_entities(head_part.view(-1)).view(batch_size, negative_sample_size, -1)
@@ -170,30 +202,48 @@ class LAMAKE(nn.Module):
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part[:, 0]).unsqueeze(1)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
             
-            head_cluster = self.get_cluster_embedding(head_part[:, 0])
-            tail_cluster = self.get_cluster_embedding(tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            
-            head_parent_cluster = self.get_parent_cluster_embedding(head_part[:, 0])
-            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            
             head_combined = self.rho * head_init + (1 - self.rho) * head_text
             tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
+            
+            head_cluster = self.get_cluster_embedding(head_part[:, 0], head_combined)
+            tail_cluster = self.get_cluster_embedding(tail_part.view(-1), tail_combined).view(batch_size, negative_sample_size, -1)
+            
+            head_parent_cluster = self.get_parent_cluster_embedding(head_part[:, 0], head_combined)
+            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part.view(-1), tail_combined).view(batch_size, negative_sample_size, -1)
             
             head_text_dist = self.distance(head_combined, head_text)
             tail_text_dist = self.distance(tail_combined, tail_text)
             
-            head_cluster_dist = self.distance(head_combined, head_cluster)
-            tail_cluster_dist = self.distance(tail_combined, tail_cluster)
+            # Compute intra-cluster distances
+            intra_cluster_dists = []
+            for cluster_embedding in torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0):
+                cluster_entities = self.entity_hierarchy[cluster_embedding]
+                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined, tail_combined.view(-1, tail_combined.size(-1))], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
+                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
+                intra_cluster_dists.append(intra_cluster_dist)
+            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
             
-            head_parent_cluster_dist = self.distance(head_cluster, head_parent_cluster)
-            tail_parent_cluster_dist = self.distance(tail_cluster, tail_parent_cluster)
+            # Compute inter-cluster distances
+            inter_cluster_dists = []
+            for i, cluster_embedding in enumerate(torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0)):
+                other_cluster_embeddings = torch.cat([head_cluster[:i], head_cluster[i+1:], tail_cluster.view(-1, tail_cluster.size(-1))[:i], tail_cluster.view(-1, tail_cluster.size(-1))[i+1:]], dim=0)
+                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
+                inter_cluster_dists.append(inter_cluster_dist)
+                inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
+
+            # Compute parent-child distances
+            parent_child_dists = []
+            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0), torch.cat([head_parent_cluster, tail_parent_cluster.view(-1, tail_parent_cluster.size(-1))], dim=0)):
+                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
+                parent_child_dists.append(parent_child_dist)
+            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
             
-            score = - self.alpha * (head_cluster_dist + tail_cluster_dist)
+            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
+            
+            score = - self.alpha * hierarchical_loss
             score = score - self.beta * (head_text_dist + tail_text_dist)
-            score = score - self.gamma_1 * (head_parent_cluster_dist + tail_parent_cluster_dist)
             
             true_triple_score = self.score_func(head_combined, relation, tail_combined)
-            
             negative_tails = self.sample_negative_entities(tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
             negative_tail_scores = self.score_func(head_combined, relation, negative_tails)
             
@@ -203,10 +253,10 @@ class LAMAKE(nn.Module):
             raise ValueError('mode %s not supported' % mode)
         
         return score
-    
-    def get_cluster_embedding(self, entities):
+
+    def get_cluster_embedding(self, entities, entity_embeddings):
         """
-        Compute the cluster center embeddings for the given entities.
+        Compute the cluster center embeddings for the given entities based on the provided entity embeddings.
         """
         if isinstance(entities, torch.Tensor):
             entities = entities.tolist()
@@ -214,16 +264,18 @@ class LAMAKE(nn.Module):
         cluster_embeddings = []
         for entity in entities:
             cluster = self.entity_hierarchy[entity]
-            cluster_embedding = torch.mean(torch.index_select(self.entity_embedding, dim=0, index=torch.tensor(list(cluster))), dim=0)
+            cluster_entities = list(cluster)
+            cluster_entity_indices = torch.tensor([entities.index(e) for e in cluster_entities])
+            cluster_entity_embeddings = torch.index_select(entity_embeddings, dim=0, index=cluster_entity_indices)
+            cluster_embedding = torch.mean(cluster_entity_embeddings, dim=0)
             cluster_embeddings.append(cluster_embedding)
         
         cluster_embeddings = torch.stack(cluster_embeddings, dim=0)
-        
         return cluster_embeddings
-    
-    def get_parent_cluster_embedding(self, entities):
+
+    def get_parent_cluster_embedding(self, entities, entity_embeddings):
         """
-        Compute the parent cluster embeddings for the given entities.
+        Compute the parent cluster embeddings for the given entities based on the provided entity embeddings.
         """
         if isinstance(entities, torch.Tensor):
             entities = entities.tolist()
@@ -232,7 +284,10 @@ class LAMAKE(nn.Module):
         for entity in entities:
             cluster = self.entity_hierarchy[entity]
             parent_cluster = self.entity_hierarchy[cluster]
-            parent_cluster_embedding = torch.mean(torch.index_select(self.entity_embedding, dim=0, index=torch.tensor(list(parent_cluster))), dim=0)
+            parent_cluster_entities = list(parent_cluster)
+            parent_cluster_entity_indices = torch.tensor([entities.index(e) for e in parent_cluster_entities])
+            parent_cluster_entity_embeddings = torch.index_select(entity_embeddings, dim=0, index=parent_cluster_entity_indices)
+            parent_cluster_embedding = torch.mean(parent_cluster_entity_embeddings, dim=0)
             parent_cluster_embeddings.append(parent_cluster_embedding)
         
         parent_cluster_embeddings = torch.stack(parent_cluster_embeddings, dim=0)

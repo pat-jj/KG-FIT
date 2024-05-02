@@ -112,35 +112,49 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
     return np.array(embeddings), entity_info, entity_embeddings
 
-def build_hierarchy(children, n_leaves, entity_labels):
+def build_hierarchy(children, n_leaves, entity_labels, labels):
     """
-    Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys.
+    Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys, 
+    where each leaf node contains a list of entities.
     """
-    # Initialize with leaf nodes
-    hierarchy = {f"Leaf_{i}": entity_labels[i] for i in range(n_leaves)}
-    next_cluster_id = n_leaves  # Start numbering clusters from the number of leaves
+    # Initialize with leaf nodes containing lists of entities
+    hierarchy = {f"Cluster_{i}": [entity_labels[idx] for idx in np.where(labels == i)[0]]
+                 for i in range(n_leaves)}
+    next_cluster_id = n_leaves  # Start numbering new clusters from the number of initial clusters
 
     # Intermediate nodes formed from merging children
     for i, (left, right) in enumerate(children):
         cluster_id = f"Cluster_{next_cluster_id}"
-        hierarchy[cluster_id] = {f"Cluster_{left}": hierarchy.pop(f"Leaf_{left}" if left < n_leaves else f"Cluster_{left}"),
-                                 f"Cluster_{right}": hierarchy.pop(f"Leaf_{right}" if right < n_leaves else f"Cluster_{right}")}
+        left_key = f"Cluster_{left}" if left >= n_leaves else f"Cluster_{left}"
+        right_key = f"Cluster_{right}" if right >= n_leaves else f"Cluster_{right}"
+
+        if left_key not in hierarchy or right_key not in hierarchy:
+            print(f"Error with keys: {left_key} or {right_key} not found.")
+            continue  # Optionally handle the error or break
+
+        hierarchy[cluster_id] = {
+            left_key: hierarchy.pop(left_key),
+            right_key: hierarchy.pop(right_key)
+        }
         next_cluster_id += 1
 
-    # Return the root of the hierarchy
-    return hierarchy[f"Cluster_{next_cluster_id - 1}"]
+    # Return the root of the hierarchy, adjusting for the last cluster ID added
+    return hierarchy.get(f"Cluster_{next_cluster_id - 1}", {})
+
 
 def seed_hierarchy_construction(entities, embeddings, distance_threshold):
     """
-    Function to perform agglomerative clustering and build hierarchy
+    Function to perform agglomerative clustering and build a hierarchy where each leaf node
+    contains a list of entities.
     """
     clustering = AgglomerativeClustering(metric='cosine', linkage='average',
                                          distance_threshold=distance_threshold, n_clusters=None)
     clustering.fit(embeddings)
     
     # Get the root of the hierarchy
-    hierarchy_root = build_hierarchy(clustering.children_, len(entities), entities)
+    hierarchy_root = build_hierarchy(clustering.children_, clustering.n_clusters_, entities, clustering.labels_)
     return hierarchy_root
+
 
 def agglomerative_clustering(entities, embeddings, distance_threshold):
     clustering = AgglomerativeClustering(metric='cosine', linkage='average', distance_threshold=distance_threshold, n_clusters=None)
