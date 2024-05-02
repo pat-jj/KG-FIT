@@ -11,6 +11,7 @@ import random
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import concurrent.futures
+import pickle
 
 with open('./openai_api.key', 'r') as f:
     api_key = f.read().strip()
@@ -112,67 +113,72 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
     return np.array(embeddings), entity_info, entity_embeddings
 
-def build_hierarchy(children, n_leaves, entity_labels, labels):
+
+def build_hierarchy(children, n_leaves, clusters):
     """
     Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys,
-    where each leaf node contains a list of entities.
+    starting with clusters as leaves.
     """
-    # Initialize with leaf nodes containing lists of entities
-    hierarchy = {f"Cluster_{i}": [entity_labels[idx] for idx in np.where(labels == i)[0]]
-                 for i in range(n_leaves)}
-    next_cluster_id = n_leaves  # Start numbering new clusters from the number of initial clusters
+    # Initialize with clusters as leaf nodes
+    hierarchy = {f"Cluster_{i}": clusters[f"Cluster_{i}"] for i in range(1, n_leaves + 1)}
+    next_cluster_id = n_leaves + 1  # Start numbering new clusters from the number of initial clusters
 
-    # Intermediate nodes formed from merging children
+    # Intermediate nodes formed from merging clusters
     for i, (left, right) in enumerate(children):
         cluster_id = f"Cluster_{next_cluster_id}"
-        left_key = f"Cluster_{left}" if left < n_leaves else f"Cluster_{left + n_leaves}"
-        right_key = f"Cluster_{right}" if right < n_leaves else f"Cluster_{right + n_leaves}"
-
-        if left_key not in hierarchy or right_key not in hierarchy:
-            print(f"Error with keys: {left_key} or {right_key} not found.")
-            continue
-
         hierarchy[cluster_id] = {
-            left_key: hierarchy.pop(left_key),
-            right_key: hierarchy.pop(right_key)
+            f"Cluster_{left + 1}": hierarchy.pop(f"Cluster_{left + 1}"),
+            f"Cluster_{right + 1}": hierarchy.pop(f"Cluster_{right + 1}")
         }
         next_cluster_id += 1
 
-    # Return the root of the hierarchy, adjusting for the last cluster ID added
-    return hierarchy.get(f"Cluster_{next_cluster_id - 1}", {})
+    # Return the root of the hierarchy
+    return hierarchy[f"Cluster_{n_leaves + 1}"]
 
-
-
-def seed_hierarchy_construction(entities, embeddings, distance_threshold):
+def seed_hierarchy_construction(args, entities, embeddings, distance_threshold):
     """
-    Function to perform agglomerative clustering and build a hierarchy where each leaf node
-    contains a list of entities.
+    Function to perform agglomerative clustering and build hierarchy with clusters as leaves
     """
-    clustering = AgglomerativeClustering(metric='cosine', linkage='average',
-                                         distance_threshold=distance_threshold, n_clusters=None)
-    clustering.fit(embeddings)
-    
+    # Generate clusters
+    clusters = agglomerative_clustering(args, entities, embeddings, distance_threshold)
+
     # Get the root of the hierarchy
-    hierarchy_root = build_hierarchy(clustering.children_, clustering.n_clusters_, entities, clustering.labels_)
+    clustering = perform_or_load_clustering(args, entities, embeddings, distance_threshold)
+    hierarchy_root = build_hierarchy(clustering.children_, clustering.n_clusters_, clusters)
     return hierarchy_root
 
+def perform_or_load_clustering(args, entities, embeddings, distance_threshold):
+    # Check if clustering exists, if not perform clustering
+    clustering_file = f"{args.output_dir}/{args.dataset}/clustering/clustering_{distance_threshold:.2f}.pkl"
+    if not os.path.exists(clustering_file):
+        print(f"Performing agglomerative clustering with distance threshold {distance_threshold:.2f}...")
+        clustering = AgglomerativeClustering(metric='cosine', linkage='average', distance_threshold=distance_threshold, n_clusters=None)
+        clustering.fit(embeddings)
+        with open(clustering_file, 'wb') as f:
+            pickle.dump(clustering, f)
+    else:
+        print(f"Loading existing clustering from {clustering_file}...")
+        with open(clustering_file, 'rb') as f:
+            clustering = pickle.load(f)
+    return clustering
 
-def agglomerative_clustering(entities, embeddings, distance_threshold):
-    clustering = AgglomerativeClustering(metric='cosine', linkage='average', distance_threshold=distance_threshold, n_clusters=None)
-    clustering.fit(embeddings)
+
+def agglomerative_clustering(args, entities, embeddings, distance_threshold):
+    clustering = perform_or_load_clustering(args, entities, embeddings, distance_threshold)
     
+    print(f"Number of clusters: {clustering.n_clusters_}")
     clusters = {}
     for i in range(clustering.n_clusters_):
         cluster_indices = np.where(clustering.labels_ == i)[0]
         cluster_entities = [entities[idx] for idx in cluster_indices]
         clusters[f"Cluster_{i+1}"] = cluster_entities
         
-    logging.info(f"Clusters: {clusters}")
+    # logging.info(f"Clusters: {clusters}")
     
     return clusters
 
-def evaluate_threshold(entities, embeddings, threshold):
-    clusters = agglomerative_clustering(entities, embeddings, threshold)
+def evaluate_threshold(args, entities, embeddings, threshold):
+    clusters = agglomerative_clustering(args, entities, embeddings, threshold)
     num_clusters = len(clusters)
     
     if num_clusters == 1:
@@ -196,7 +202,7 @@ def find_optimal_threshold(args, entities, embeddings, min_threshold=0.1, max_th
     logging.info(f"Starting threshold evaluation with {num_thresholds} thresholds: {thresholds}")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_threads) as executor:
-        futures = [executor.submit(evaluate_threshold, entities, embeddings, threshold) for threshold in thresholds]
+        futures = [executor.submit(evaluate_threshold, args, entities, embeddings, threshold) for threshold in thresholds]
         
         best_score = -1.0
         best_threshold = None
@@ -212,7 +218,7 @@ def find_optimal_threshold(args, entities, embeddings, min_threshold=0.1, max_th
     if best_threshold is None:
         logging.info("No suitable clustering found. Returning the clustering with the highest threshold.")
         best_threshold = thresholds[-1]
-        best_clusters = agglomerative_clustering(entities, embeddings, best_threshold)
+        best_clusters = agglomerative_clustering(args, entities, embeddings, best_threshold)
     
     return best_threshold, best_clusters
 
@@ -373,7 +379,7 @@ def main():
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
-        seed_clusters = seed_hierarchy_construction(entities_text, embeddings, best_threshold)
+        seed_clusters = seed_hierarchy_construction(args, entities_text, embeddings, best_threshold)
         with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'w') as f:
             json.dump(seed_clusters, f, indent=4)
     else:
