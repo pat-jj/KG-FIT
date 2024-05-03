@@ -184,6 +184,7 @@ def build_seed_hierarchy(clusters, initial_hierarchy):
     hierarchy = refine_1(hierarchy, clusters_)
     hierarchy = refine_2(hierarchy)
     hierarchy = refine_3(hierarchy)
+    hierarchy = refine_4(hierarchy)
     
     return hierarchy
 
@@ -393,24 +394,24 @@ def main():
     print("Start Generating Embeddings...")
     embeddings, entity_info, entity_embeddings = generate_embeddings(args, entity_info=entity_info, entity_embeddings=entity_embeddings, dim=args.dimensions)
 
-    if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_clusters.json"):
+    if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json"):
         print("Start Finding Optimal Threshold...")
         # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.3, max_threshold=0.9, num_thresholds=20)
         best_threshold = 0.52
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
-        seed_clusters = seed_hierarchy_construction(args, entities_text, embeddings, best_threshold)
-        with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'w') as f:
-            json.dump(seed_clusters, f, indent=4)
+        seed_hierarchy = seed_hierarchy_construction(args, entities_text, embeddings, best_threshold)
+        with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'w') as f:
+            json.dump(seed_hierarchy, f, indent=4)
     else:
-        print(f"Loading existing seed clusters from {args.output_dir}/{args.dataset}/seed_clusters.json...")
-        with open(f"{args.output_dir}/{args.dataset}/seed_clusters.json", 'r') as f:
-            seed_clusters = json.load(f)
+        print(f"Loading existing seed clusters from {args.output_dir}/{args.dataset}/seed_hierarchy.json...")
+        with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'r') as f:
+            seed_hierarchy = json.load(f)
         print("Done.")
         
     # print("Start Refining Clusters with LLM...")
-    # refined_clusters = llm_refine_hierarchy(seed_clusters, num_threads=args.num_threads, max_entities=args.max_entities)
+    # refined_clusters = llm_refine_hierarchy(seed_hierarchy, num_threads=args.num_threads, max_entities=args.max_entities)
     
     # print("Saving Clusters...")
     

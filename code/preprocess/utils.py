@@ -122,3 +122,23 @@ def refine_3(d):
     # Start the processing with the original dictionary
     refined_dict = process_dict(d)
     return refined_dict
+
+def refine_4(d):
+    # Recursive function to process and refine each dictionary
+    def process_dict(sub_dict):
+        new_dict = {}  # To accumulate refined results
+        for key, value in list(sub_dict.items()):
+            if isinstance(value, dict):
+                processed = process_dict(value)  # Recursively process
+                if processed:  # Only add non-empty results
+                    if isinstance(processed, dict) and len(processed) == 1:
+                        new_dict[key] = list(processed.values())[0]
+                    else:
+                        new_dict[key] = processed
+            else:  # Keep non-dict items as they are
+                new_dict[key] = value
+        return new_dict
+
+    # Start the processing with the original dictionary
+    refined_dict = process_dict(d)
+    return refined_dict
