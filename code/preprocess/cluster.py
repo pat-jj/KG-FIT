@@ -12,25 +12,12 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import concurrent.futures
 import pickle
+from collections import defaultdict
+from utils import *
 
 with open('./openai_api.key', 'r') as f:
     api_key = f.read().strip()
     
-    
-def convert_numpy(obj):
-    if isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        return {convert_numpy(key): convert_numpy(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy(element) for element in obj]
-    elif isinstance(obj, tuple):
-        return tuple(convert_numpy(element) for element in obj)
-    return obj
 
 client = OpenAI(api_key=api_key)
 
@@ -129,62 +116,6 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
     return np.array(embeddings), entity_info, entity_embeddings
 
-
-def build_hierarchy_new(children, n_leaves, clusters, clustering):
-    """
-    Builds a nested dictionary representing the cluster hierarchy.
-    """
-    hierarchy = {int(i): entities for i, entities in enumerate(clusters.values())}
-    next_cluster_id = len(clusters)
-
-    # Intermediate nodes formed from merging children
-    for i, (left, right) in enumerate(children):
-        if left < n_leaves and right < n_leaves:
-            # Both children are leaf nodes, merge their entities
-            left_cluster = int(clustering.labels_[left])
-            right_cluster = int(clustering.labels_[right])
-            merged_entities = hierarchy[left_cluster] + hierarchy[right_cluster]
-            hierarchy[int(next_cluster_id)] = merged_entities
-            next_cluster_id += 1
-        else:
-            # One or both children are intermediate nodes
-            left_cluster = int(left - n_leaves if left >= n_leaves else clustering.labels_[left])
-            right_cluster = int(right - n_leaves if right >= n_leaves else clustering.labels_[right])
-            hierarchy[int(next_cluster_id)] = {left_cluster: hierarchy[left_cluster],
-                                                right_cluster: hierarchy[right_cluster]}
-            next_cluster_id += 1
-
-    # Return the root of the hierarchy
-    return hierarchy[int(next_cluster_id - 1)]
-
-def build_hierarchy(children, n_leaves, entity_labels, clustering):
-    """
-    Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys.
-    """
-    # Initialize with leaf nodes
-    hierarchy = {f"Leaf_{i}": entity_labels[i] for i in range(n_leaves)}
-    next_cluster_id = n_leaves  # Start numbering clusters from the number of leaves
-
-    # Intermediate nodes formed from merging children
-    for i, (left, right) in enumerate(children):
-        cluster_id = f"Cluster_{next_cluster_id}"
-        hierarchy[cluster_id] = {f"Cluster_{left}": hierarchy.pop(f"Leaf_{left}" if left < n_leaves else f"Cluster_{left}"),
-                                 f"Cluster_{right}": hierarchy.pop(f"Leaf_{right}" if right < n_leaves else f"Cluster_{right}")}
-        next_cluster_id += 1
-
-    # Return the root of the hierarchy
-    return hierarchy[f"Cluster_{next_cluster_id - 1}"]
-
-def seed_hierarchy_construction(args, entities, embeddings, distance_threshold):
-    """
-    Function to perform agglomerative clustering and build hierarchy using clusters.
-    """
-    clusters, clustering = agglomerative_clustering(args, entities, embeddings, distance_threshold)
-    # Get the root of the hierarchy
-    hierarchy_root = build_hierarchy(clustering.children_, len(entities), clusters, clustering)
-
-    return hierarchy_root
-
 def perform_or_load_clustering(args, entities, embeddings, distance_threshold):
     # Check if clustering exists, if not perform clustering
     clustering_file = f"{args.output_dir}/{args.dataset}/clustering/clustering_{distance_threshold:.2f}.pkl"
@@ -214,6 +145,58 @@ def agglomerative_clustering(args, entities, embeddings, distance_threshold):
         clusters[f"Cluster_{i+1}"] = cluster_entities
         
     return clusters, clustering
+
+def build_hierarchy(children, n_leaves, entity_labels, clustering):
+    """
+    Builds a nested dictionary representing the cluster hierarchy with cluster IDs as keys.
+    """
+    # Initialize with leaf nodes
+    hierarchy = {f"Leaf_{i}": entity_labels[i] for i in range(n_leaves)}
+    next_cluster_id = n_leaves  # Start numbering clusters from the number of leaves
+
+    # Intermediate nodes formed from merging children
+    for i, (left, right) in enumerate(children):
+        cluster_id = f"Cluster_{next_cluster_id}"
+        hierarchy[cluster_id] = {f"Cluster_{left}": hierarchy.pop(f"Leaf_{left}" if left < n_leaves else f"Cluster_{left}"),
+                                 f"Cluster_{right}": hierarchy.pop(f"Leaf_{right}" if right < n_leaves else f"Cluster_{right}")}
+        next_cluster_id += 1
+
+    # Return the root of the hierarchy
+    return hierarchy[f"Cluster_{next_cluster_id - 1}"]
+
+def build_seed_hierarchy(clusters, initial_hierarchy):
+    """
+    Builds a nested dictionary representing the cluster hierarchy.
+    """
+    print("Building seed hierarchy...")
+    leaf_keys, leaf_values = find_leaves(initial_hierarchy)
+    child2parent = map_child_to_parent(initial_hierarchy)
+    clusters_ = {int(i): entities for i, entities in enumerate(clusters.values())}
+    entity2clusterid = {}
+
+    for i, cluster in enumerate(clusters_.values()):
+        for entity in cluster:
+            entity2clusterid[entity] = i
+            
+    clusterid2count = defaultdict(int)
+    
+    hierarchy = label_(initial_hierarchy, entity2clusterid, clusterid2count)
+    hierarchy = refine_1(hierarchy, clusters_)
+    hierarchy = refine_2(hierarchy)
+    hierarchy = refine_3(hierarchy)
+    
+    return hierarchy
+
+def seed_hierarchy_construction(args, entities, embeddings, distance_threshold):
+    """
+    Function to perform agglomerative clustering and build hierarchy using clusters.
+    """
+    clusters, clustering = agglomerative_clustering(args, entities, embeddings, distance_threshold)
+    # Get the root of the hierarchy
+    initial_hierarchy = build_hierarchy(clustering.children_, len(entities), entities, clustering)
+    seed_hierarchy = build_seed_hierarchy(clusters, initial_hierarchy)
+
+    return seed_hierarchy
 
 def evaluate_threshold(args, entities, embeddings, threshold):
     clusters = agglomerative_clustering(args, entities, embeddings, threshold)
