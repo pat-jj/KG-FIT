@@ -347,11 +347,14 @@ def main():
         seed_hierarchy = seed_hierarchy_construction(args, entities_text, embeddings, best_threshold)
         with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'w') as f:
             json.dump(seed_hierarchy, f, indent=4)
+
     else:
         print(f"Loading existing seed clusters from {args.output_dir}/{args.dataset}/seed_hierarchy.json...")
         with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'r') as f:
             seed_hierarchy = json.load(f)
-        print("Done.")
+            
+    seed_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(seed_hierarchy)
+    print("Done.")
 
     print("Start Computing Clusters Embeddings...")
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.json"):
@@ -361,11 +364,21 @@ def main():
             clusters_embeddings[cluster_id] = clusters_embeddings[cluster_id].tolist()
         with open(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.json", 'w') as f:
             json.dump(clusters_embeddings, f, indent=4)
+            
+        embs = []
+        for i in range(len(key_map_inv)):
+            original_key = key_map_inv[i]
+            emb = clusters_embeddings[original_key]
+            embs.append(emb)
+        embs = np.array(embs)
+        np.save(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.npy", embs)
+        
+        
     print("Done.")
     
     print("Start labeling hierarchy information to entities...")
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_info_seed_hier.json"):
-        entity_info_seed_hier = labeling_hierarchy_to_entities(seed_hierarchy, entity_info)
+        entity_info_seed_hier = labeling_hierarchy_to_entities(seed_hierarchy_int, entity_info)
         with open(f"{args.output_dir}/{args.dataset}/entity_info_seed_hier.json", 'w') as f:
             json.dump(entity_info_seed_hier, f, indent=4)
     print("Done.")

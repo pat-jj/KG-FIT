@@ -38,6 +38,28 @@ def node2parentpath(d, source_cluster):
     
     return parent_path, parent_distances
 
+def rename_clusters_to_ints(original_dict, start_index=0, key_map=None):
+    """
+    Recursively renames keys of the nested dictionary to integers, incrementing from a given start index.
+    Also tracks the mapping from original keys to new keys.
+    """
+    if key_map is None:
+        key_map = {}
+
+    new_dict = {}
+    index = start_index
+
+    for key, value in original_dict.items():
+        key_map[key] = index
+        if isinstance(value, dict):
+            new_dict[index], index, key_map, key_map_inv = rename_clusters_to_ints(value, index + 1, key_map)
+        else:
+            new_dict[index] = value
+            index += 1
+
+    key_map_inv = {v: k for k, v in key_map.items()}
+    return new_dict, index, key_map, key_map_inv
+
 def convert_numpy(obj):
     if isinstance(obj, np.integer):
         return int(obj)

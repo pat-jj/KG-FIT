@@ -256,6 +256,7 @@ class KGFIT(nn.Module):
         
         return score
 
+
     def get_cluster_embedding(self, entities, entity_embeddings):
         """
         Compute the cluster center embeddings for the given entities based on the provided entity embeddings.
@@ -446,7 +447,6 @@ class KGFIT(nn.Module):
 
         score = self.gamma.item() - score.sum(dim = 2) * self.modulus
         return score
-    
     
     
     
