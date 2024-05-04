@@ -52,9 +52,9 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
     original_descriptions = [entity_info[entity]["original_description"] for entity in entities]
     entities_text = [entity_info[entity]["text_label"] for entity in entities]
     
-    if os.path.exists(f"{args.output_dir}/{args.dataset}/entity_embeddings.json"):
-        print(f"Loading existing entity embeddings from {args.output_dir}/{args.dataset}/entity_embeddings.json...")
-        with open(f"{args.output_dir}/{args.dataset}/entity_embeddings.json", 'r') as f:
+    if os.path.exists(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.json"):
+        print(f"Loading existing entity embeddings from {args.output_dir}/{args.dataset}/entity_init_embeddings.json...")
+        with open(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.json", 'r') as f:
             entity_embeddings = json.load(f)
         print("Done.")
         
@@ -111,7 +111,7 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
                 with open(f"{args.output_dir}/{args.dataset}/entity_info.json", 'w') as f:
                     json.dump(entity_info, f, indent=4)
                 
-                with open(f"{args.output_dir}/{args.dataset}/entity_embeddings.json", 'w') as f:
+                with open(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.json", 'w') as f:
                     json.dump(entity_embeddings, f, indent=4)
         
     return np.array(embeddings), entity_info, entity_embeddings

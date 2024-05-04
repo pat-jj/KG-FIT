@@ -6,6 +6,7 @@ import os
 import time
 import argparse
 from tqdm import tqdm
+from utils import *
 
 
 class LAMAKE(nn.Module):
@@ -505,8 +506,8 @@ def main(args):
     Main function for training and evaluating the LAMAKE model.
     """
     # Load the entity hierarchy and text embeddings
-    entity_hierarchy = load_entity_hierarchy(args.hierarchy_path)
-    entity_text_embeddings = load_entity_text_embeddings(args.text_embedding_path)
+    entity_hierarchy = read_hierarchy(args)
+    entity_text_embeddings = read_entity_initial_embedding(args)
 
     # Load the knowledge graph dataset
     train_data, valid_data, test_data, nentity, nrelation = load_data(args.data_path)
@@ -613,9 +614,11 @@ def main(args):
 if __name__ == 'main':
     parser = argparse.ArgumentParser(description='LAMAKE')
     # Data paths
-    parser.add_argument('--data_path', type=str, default='data/FB15k-237', help='Path to the dataset')
-    parser.add_argument('--hierarchy_path', type=str, default='data/FB15k-237/hierarchy.json', help='Path to the entity hierarchy')
-    parser.add_argument('--text_embedding_path', type=str, default='data/FB15k-237/text_embeddings.pt', help='Path to the entity text embeddings')
+    parser.add_argument('--data_path', type=str, default='../data', help='Path to the dataset')
+    parser.add_argument('--process_path', type=str, default='/data/pj20/lamake_data', help='Path to the entity hierarchy')
+    parser.add_argument('--dataset', type=str, default='FB15K-237', help='Dataset name')
+    parser.add_argument('--hierarchy_type', type=str, default='seed', choices=['seed', 'llm'],  help='Type of hierarchy to use')
+
     parser.add_argument('--save_path', type=str, default='checkpoints', help='Path to save the model checkpoints')
 
     # Model hyperparameters
