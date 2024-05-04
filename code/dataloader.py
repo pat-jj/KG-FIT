@@ -155,9 +155,9 @@ class TestDataset(Dataset):
     
     @staticmethod
     def collate_fn(data):
-        positive_sample = torch.stack([_[0] for _ in data], dim=0)
-        negative_sample = torch.stack([_[1] for _ in data], dim=0)
-        filter_bias = torch.stack([_[2] for _ in data], dim=0)
+        positive_sample   =   torch.stack([_[0] for _ in data], dim=0)
+        negative_sample   =   torch.stack([_[1] for _ in data], dim=0)
+        filter_bias       =   torch.stack([_[2] for _ in data], dim=0)
         mode = data[0][3]
         return positive_sample, negative_sample, filter_bias, mode
     

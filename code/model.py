@@ -1,19 +1,20 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import os
-import time
-import argparse
-from tqdm import tqdm
-from utils import *
+import numpy                as np
+import torch.nn             as nn
+import torch.nn.functional  as F
+
+from utils                  import *
+from dataloader             import *
+from tqdm                   import tqdm
+from torch.utils.data       import DataLoader
+from sklearn.metrics        import average_precision_score
 
 
-class LAMAKE(nn.Module):
+class KGFIT(nn.Module):
     def __init__(self, model_name, nentity, nrelation, hidden_dim, gamma, 
                  double_entity_embedding=False, double_relation_embedding=False,
                  entity_hierarchy=None, entity_text_embeddings=None, rho=0.5, alpha=0.5, beta=0.5, gamma_1=1.0, gamma_2=1.0, lambda_1=1.0, lambda_2=1.0):
-        super(LAMAKE, self).__init__()
+        super(KGFIT, self).__init__()
         self.model_name = model_name
         self.nentity = nentity
         self.nrelation = nrelation
@@ -64,13 +65,13 @@ class LAMAKE(nn.Module):
         
         self.entity_hierarchy = entity_hierarchy
         self.entity_text_embeddings = entity_text_embeddings
-        self.rho = rho  # Hyperparameter controlling the influence of the randomly initialized component in the embedding
-        self.alpha = alpha  # Weight for the hierarchical constraint
-        self.beta = beta    # Weight for the text embedding deviation constraint
-        self.gamma_1 = gamma_1  # Weight for the parent-child constraint
-        self.gamma_2 = gamma_2  # Weight for the link prediction constraint
-        self.lambda_1 = lambda_1  # Weight for the inter-cluster separation
-        self.lambda_2 = lambda_2  # Weight for the parent-child relationship preservation
+        self.rho = rho              # Hyperparameter controlling the influence of the randomly initialized component in the embedding
+        self.alpha = alpha          # Weight for the hierarchical constraint
+        self.beta = beta            # Weight for the text embedding deviation constraint
+        self.gamma_1 = gamma_1      # Weight for the parent-child constraint
+        self.gamma_2 = gamma_2      # Weight for the link prediction constraint
+        self.lambda_1 = lambda_1    # Weight for the inter-cluster separation
+        self.lambda_2 = lambda_2    # Weight for the parent-child relationship preservation
         
     def forward(self, sample, mode='single'):
         if mode == 'single':
@@ -447,204 +448,184 @@ class LAMAKE(nn.Module):
         return score
     
     
-def train_lamake(model, optimizer, train_iterator, args):
-    """
-    Train the LAMAKE model.
-    """
-    model.train()
-    optimizer.zero_grad()
-    positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
-    if args.cuda:
-        positive_sample = positive_sample.cuda()
-        negative_sample = negative_sample.cuda()
-        subsampling_weight = subsampling_weight.cuda()
-        
-    negative_score = model((positive_sample, negative_sample), mode=mode)
-
-    if args.negative_adversarial_sampling:
-        negative_score = (F.softmax(negative_score * args.adversarial_temperature, dim=1).detach() * F.logsigmoid(-negative_score)).sum(dim=1)
-    else:
-        negative_score = F.logsigmoid(-negative_score).mean(dim=1)
-        
-    positive_score = model(positive_sample)
-    positive_score = F.logsigmoid(positive_score).squeeze(dim=1)
-
-    if args.uni_weight:
-        positive_sample_loss = -positive_score.mean()
-        negative_sample_loss = -negative_score.mean()
-    else:
-        positive_sample_loss = -(subsampling_weight * positive_score).sum() / subsampling_weight.sum()
-        negative_sample_loss = -(subsampling_weight * negative_score).sum() / subsampling_weight.sum()
-        
-    loss = (positive_sample_loss + negative_sample_loss) / 2
-
-    if args.regularization != 0.0:
-        regularization = args.regularization * (
-            model.entity_embedding.norm(p=3) ** 3 +
-            model.relation_embedding.norm(p=3).norm(p=3) ** 3
-        )
-        loss = loss + regularization
-        regularization_log = {'regularization': regularization.item()}
-    else:
-        regularization_log = {}
-        
-    loss.backward()
-    optimizer.step()
-
-    log = {
-        **regularization_log,
-        'positive_sample_loss': positive_sample_loss.item(),
-        'negative_sample_loss': negative_sample_loss.item(),
-        'loss': loss.item()
-    }
-
-    return log
-
-
-def main(args):
-    """
-    Main function for training and evaluating the LAMAKE model.
-    """
-    # Load the entity hierarchy and text embeddings
-    entity_hierarchy = read_hierarchy(args)
-    entity_text_embeddings = read_entity_initial_embedding(args)
-
-    # Load the knowledge graph dataset
-    train_data, valid_data, test_data, nentity, nrelation = load_data(args.data_path)
-
-    # Create the LAMAKE model
-    lamake_model = LAMAKE(
-        model_name=args.model,
-        nentity=nentity,
-        nrelation=nrelation,
-        hidden_dim=args.hidden_dim,
-        gamma=args.gamma,
-        double_entity_embedding=args.double_entity_embedding,
-        double_relation_embedding=args.double_relation_embedding,
-        entity_hierarchy=entity_hierarchy,
-        entity_text_embeddings=entity_text_embeddings,
-        rho=args.rho,
-        alpha=args.alpha,
-        beta=args.beta,
-        gamma_1=args.gamma_1,
-        gamma_2=args.gamma_2
-    )
-
-    if args.cuda:
-        lamake_model = lamake_model.cuda()
-
-    # Create the optimizer
-    optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, lamake_model.parameters()), 
-        lr=args.learning_rate
-    )
     
-    # Create the train data iterator
-    train_iterator = DataIterator(
-        train_data,
-        batch_size=args.batch_size,
-        neg_size=args.neg_size,
-        mode='head-batch'
-    )
+    
+    @staticmethod
+    def train_step(model, optimizer, train_iterator, args):
+        '''
+        A single train step. Apply back-propation and return the loss
+        '''
 
-    # Training loop
-    best_mrr = 0
-    best_epoch = 0
-    mrr_early_stop = 0
-    for epoch in range(args.num_epochs):
-        lamake_model.train()
-        start_time = time.time()
-        epoch_loss = 0
+        model.train()
 
-        for batch in tqdm(train_iterator, desc=f"Epoch {epoch+1}", total=len(train_iterator)):
-            log = train_lamake(lamake_model, optimizer, batch, args)
-            epoch_loss += log['loss']
+        optimizer.zero_grad()
 
-        lamake_model.eval()
-        with torch.no_grad():
-            valid_mrr, valid_hits1, valid_hits3, valid_hits10 = evaluate(lamake_model, valid_data, args)
-            test_mrr, test_hits1, test_hits3, test_hits10 = evaluate(lamake_model, test_data, args)
+        positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
 
-        if valid_mrr > best_mrr:
-            best_mrr = valid_mrr
-            best_epoch = epoch
-            torch.save(lamake_model.state_dict(), os.path.join(args.save_path, 'best_model.pt'))
-            mrr_early_stop = 0
+        if args.cuda:
+            positive_sample = positive_sample.cuda()
+            negative_sample = negative_sample.cuda()
+            subsampling_weight = subsampling_weight.cuda()
+
+        negative_score = model((positive_sample, negative_sample), mode=mode)
+
+        if args.negative_adversarial_sampling:
+            #In self-adversarial sampling, we do not apply back-propagation on the sampling weight
+            negative_score = (F.softmax(negative_score * args.adversarial_temperature, dim = 1).detach() 
+                              * F.logsigmoid(-negative_score)).sum(dim = 1)
         else:
-            mrr_early_stop += 1
-            if mrr_early_stop >= args.early_stop:
-                break
+            negative_score = F.logsigmoid(-negative_score).mean(dim = 1)
 
-        end_time = time.time()
-        print(f"Epoch {epoch+1} | Loss: {epoch_loss/(epoch+1):.4f} | Valid MRR: {valid_mrr:.4f} | "
-            f"Test MRR: {test_mrr:.4f} | Best Valid MRR: {best_mrr:.4f} | "
-            f"Time: {end_time-start_time:.2f}s")
+        positive_score = model(positive_sample, mode='single')
 
-    print(f"Best Epoch: {best_epoch+1} | Best Valid MRR: {best_mrr:.4f}")
+        positive_score = F.logsigmoid(positive_score).squeeze(dim = 1)
 
-    # Evaluate the best model on the test set
-    best_model = LAMAKE(
-        model_name=args.model,
-        nentity=nentity,
-        nrelation=nrelation,
-        hidden_dim=args.hidden_dim,
-        gamma=args.gamma,
-        double_entity_embedding=args.double_entity_embedding,
-        double_relation_embedding=args.double_relation_embedding,
-        entity_hierarchy=entity_hierarchy,
-        entity_text_embeddings=entity_text_embeddings,
-        rho=args.rho,
-        alpha=args.alpha,
-        beta=args.beta,
-        gamma_1=args.gamma_1,
-        gamma_2=args.gamma_2
-    )
-    best_model.load_state_dict(torch.load(os.path.join(args.save_path, 'best_model.pt')))
-    if args.cuda:
-        best_model = best_model.cuda()
+        if args.uni_weight:
+            positive_sample_loss = - positive_score.mean()
+            negative_sample_loss = - negative_score.mean()
+        else:
+            positive_sample_loss = - (subsampling_weight * positive_score).sum()/subsampling_weight.sum()
+            negative_sample_loss = - (subsampling_weight * negative_score).sum()/subsampling_weight.sum()
 
-    best_model.eval()
-    with torch.no_grad():
-        test_mrr, test_hits1, test_hits3, test_hits10 = evaluate(best_model, test_data, args)
+        loss = (positive_sample_loss + negative_sample_loss)/2
+        
+        if args.regularization != 0.0:
+            #Use L3 regularization for ComplEx and DistMult
+            regularization = args.regularization * (
+                model.entity_embedding.norm(p = 3)**3 + 
+                model.relation_embedding.norm(p = 3).norm(p = 3)**3
+            )
+            loss = loss + regularization
+            regularization_log = {'regularization': regularization.item()}
+        else:
+            regularization_log = {}
+            
+        loss.backward()
 
-    print(f"Best Model Test Results: MRR: {test_mrr:.4f} | Hits@1: {test_hits1:.4f} | "
-        f"Hits@3: {test_hits3:.4f} | Hits@10: {test_hits10:.4f}")
+        optimizer.step()
+
+        log = {
+            **regularization_log,
+            'positive_sample_loss': positive_sample_loss.item(),
+            'negative_sample_loss': negative_sample_loss.item(),
+            'loss': loss.item()
+        }
+
+        return log
     
-    
-if __name__ == 'main':
-    parser = argparse.ArgumentParser(description='LAMAKE')
-    # Data paths
-    parser.add_argument('--data_path', type=str, default='../data', help='Path to the dataset')
-    parser.add_argument('--process_path', type=str, default='/data/pj20/lamake_data', help='Path to the entity hierarchy')
-    parser.add_argument('--dataset', type=str, default='FB15K-237', help='Dataset name')
-    parser.add_argument('--hierarchy_type', type=str, default='seed', choices=['seed', 'llm'],  help='Type of hierarchy to use')
+    @staticmethod
+    def test_step(model, test_triples, all_true_triples, args):
+        '''
+        Evaluate the model on test or valid datasets
+        '''
+        
+        model.eval()
+        
+        if args.countries:
+            #Countries S* datasets are evaluated on AUC-PR
+            #Process test data for AUC-PR evaluation
+            sample = list()
+            y_true  = list()
+            for head, relation, tail in test_triples:
+                for candidate_region in args.regions:
+                    y_true.append(1 if candidate_region == tail else 0)
+                    sample.append((head, relation, candidate_region))
 
-    parser.add_argument('--save_path', type=str, default='checkpoints', help='Path to save the model checkpoints')
+            sample = torch.LongTensor(sample)
+            if args.cuda:
+                sample = sample.cuda()
 
-    # Model hyperparameters
-    parser.add_argument('--model', type=str, default='TransE', help='Knowledge graph embedding model')
-    parser.add_argument('--hidden_dim', type=int, default=200, help='Embedding dimension')
-    parser.add_argument('--gamma', type=float, default=12.0, help='Margin for the score function')
-    parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')
-    parser.add_argument('--alpha', type=float, default=0.5, help='Weight for the entity embeddings')
-    parser.add_argument('--beta', type=float, default=0.5, help='Weight for the hierarchical constraint')
-    parser.add_argument('--gamma_1', type=float, default=1.0, help='Weight for the text embedding deviation constraint')
-    parser.add_argument('--gamma_2', type=float, default=1.0, help='Weight for the parent-child constraint')
-    parser.add_argument('--double_entity_embedding', action='store_true', help='Double the entity embedding dimensions')
-    parser.add_argument('--double_relation_embedding', action='store_true', help='Double the relation embedding dimensions')
+            with torch.no_grad():
+                y_score = model(sample).squeeze(1).cpu().numpy()
 
-    # Training settings
-    parser.add_argument('--num_epochs', type=int, default=1000, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size')
-    parser.add_argument('--neg_size', type=int, default=256, help='Negative sampling size')
-    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
-    parser.add_argument('--early_stop', type=int, default=10, help='Number of epochs for early stopping')
-    parser.add_argument('--regularization', type=float, default=0.0, help='Regularization weight')
-    parser.add_argument('--cuda', action='store_true', help='Use GPU for training')
-    parser.add_argument('--negative_adversarial_sampling', action='store_true', help='Use negative adversarial sampling')
-    parser.add_argument('--adversarial_temperature', type=float, default=1.0, help='Temperature for negative adversarial sampling')
-    parser.add_argument('--uni_weight', action='store_true', help='Use uniform weight for positive and negative samples')
+            y_true = np.array(y_true)
 
-    args = parser.parse_args()
-    
-    main(args)
+            #average_precision_score is the same as auc_pr
+            auc_pr = average_precision_score(y_true, y_score)
+
+            metrics = {'auc_pr': auc_pr}
+            
+        else:
+            #Otherwise use standard (filtered) MRR, MR, HITS@1, HITS@3, and HITS@10 metrics
+            #Prepare dataloader for evaluation
+            test_dataloader_head = DataLoader(
+                TestDataset(
+                    test_triples, 
+                    all_true_triples, 
+                    args.nentity, 
+                    args.nrelation, 
+                    'head-batch'
+                ), 
+                batch_size=args.test_batch_size,
+                num_workers=max(1, args.cpu_num//2), 
+                collate_fn=TestDataset.collate_fn
+            )
+
+            test_dataloader_tail = DataLoader(
+                TestDataset(
+                    test_triples, 
+                    all_true_triples, 
+                    args.nentity, 
+                    args.nrelation, 
+                    'tail-batch'
+                ), 
+                batch_size=args.test_batch_size,
+                num_workers=max(1, args.cpu_num//2), 
+                collate_fn=TestDataset.collate_fn
+            )
+            
+            test_dataset_list = [test_dataloader_head, test_dataloader_tail]
+            
+            logs = []
+
+            step = 0
+            total_steps = sum([len(dataset) for dataset in test_dataset_list])
+
+            with torch.no_grad():
+                for test_dataset in test_dataset_list:
+                    for positive_sample, negative_sample, filter_bias, mode in test_dataset:
+                        if args.cuda:
+                            positive_sample = positive_sample.cuda()
+                            negative_sample = negative_sample.cuda()
+                            filter_bias = filter_bias.cuda()
+
+                        batch_size = positive_sample.size(0)
+
+                        score = model((positive_sample, negative_sample), mode)
+                        score += filter_bias
+
+                        #Explicitly sort all the entities to ensure that there is no test exposure bias
+                        argsort = torch.argsort(score, dim = 1, descending=True)
+
+                        if mode == 'head-batch':
+                            positive_arg = positive_sample[:, 0]
+                        elif mode == 'tail-batch':
+                            positive_arg = positive_sample[:, 2]
+                        else:
+                            raise ValueError('mode %s not supported' % mode)
+
+                        for i in range(batch_size):
+                            #Notice that argsort is not ranking
+                            ranking = (argsort[i, :] == positive_arg[i]).nonzero()
+                            assert ranking.size(0) == 1
+
+                            #ranking + 1 is the true ranking used in evaluation metrics
+                            ranking = 1 + ranking.item()
+                            logs.append({
+                                'MRR': 1.0/ranking,
+                                'MR': float(ranking),
+                                'HITS@1': 1.0 if ranking <= 1 else 0.0,
+                                'HITS@5': 1.0 if ranking <= 5 else 0.0,
+                                'HITS@10': 1.0 if ranking <= 10 else 0.0,
+                            })
+
+                        if step % args.test_log_steps == 0:
+                            logging.info('Evaluating the model... (%d/%d)' % (step, total_steps))
+
+                        step += 1
+
+            metrics = {}
+            for metric in logs[0].keys():
+                metrics[metric] = sum([log[metric] for log in logs])/len(logs)
+
+        return metrics

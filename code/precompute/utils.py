@@ -24,6 +24,20 @@ def map_child_to_parent(d, parent_map=None, current_parent=None):
             map_child_to_parent(value, parent_map, key)
     return parent_map
 
+def node2parentpath(d, source_cluster):
+    parent_path = []
+    parent_distances = []
+    child_parent = map_child_to_parent(d)
+    current_parent = child_parent[source_cluster]
+    while current_parent in child_parent.keys():
+        parent_path.append(current_parent)
+        # parent_distances.append(distance_between_keys(d, current_parent, source_cluster))
+        current_parent = child_parent[current_parent]
+        
+    parent_path.append(current_parent)
+    
+    return parent_path, parent_distances
+
 def convert_numpy(obj):
     if isinstance(obj, np.integer):
         return int(obj)
@@ -142,3 +156,153 @@ def refine_4(d):
     # Start the processing with the original dictionary
     refined_dict = process_dict(d)
     return refined_dict
+
+
+def find_lca(root, node1, node2):
+    if root is None:
+        return None
+    
+    if isinstance(root, list):
+        if node1 in root or node2 in root:
+            return root
+    
+    if root == node1 or root == node2:
+        return root
+
+    lca_list = []
+    if isinstance(root, dict):
+        for child in root.values():
+            lca = find_lca(child, node1, node2)
+            if lca is not None:
+                lca_list.append(lca)
+            if len(lca_list) > 1:
+                return root
+
+    return lca_list[0] if lca_list else None
+
+def find_distance_from_root_to_node(root, node, distance=0):
+    if root is None:
+        return -1
+
+    if isinstance(root, list):
+        if node in root:
+            return distance
+
+    if root == node:
+        return distance
+
+    if isinstance(root, dict):
+        for child in root.values():
+            dist = find_distance_from_root_to_node(child, node, distance + 1)
+            if dist != -1:
+                return dist
+
+    return -1
+
+def distance_between_nodes(root, node1, node2):
+    lca = find_lca(root, node1, node2)
+    if lca is None:
+        return -1
+
+    distance1 = find_distance_from_root_to_node(lca, node1, 0)
+    distance2 = find_distance_from_root_to_node(lca, node2, 0)
+    
+    return distance1 + distance2 if distance1 != -1 and distance2 != -1 else -1
+
+
+def find_lca_key(root, key1, key2):
+    if root is None:
+        return None
+
+    # If the current root (or dict) contains the key directly, we check its keys
+    if key1 in root or key2 in root:
+        return root  # Found one of the keys at the current level, return this root
+
+    lca_list = []
+    if isinstance(root, dict):
+        for key, child in root.items():
+            if key == key1 or key == key2:
+                lca_list.append(key)
+            lca = find_lca_key(child, key1, key2)
+            if lca is not None:
+                lca_list.append(lca)
+            if len(lca_list) > 1:
+                return root  # Both keys found in different subtrees
+
+    return lca_list[0] if lca_list else None
+
+def find_distance_from_root_to_key(root, key, distance=0):
+    if root is None:
+        return -1
+
+    # Check if the key is the current root's direct key
+    if key in root:
+        return distance
+
+    if isinstance(root, dict):
+        for child_key, child in root.items():
+            if child_key == key:
+                return distance + 1
+            dist = find_distance_from_root_to_key(child, key, distance + 1)
+            if dist != -1:
+                return dist
+
+    return -1
+
+def distance_between_keys(root, key1, key2):
+    lca = find_lca_key(root, key1, key2)
+    if lca is None:
+        return -1
+
+    distance1 = find_distance_from_root_to_key(lca, key1, 0)
+    distance2 = find_distance_from_root_to_key(lca, key2, 0)
+    
+    return distance1 + distance2 if distance1 != -1 and distance2 != -1 else -1
+
+
+def compute_tree_depth(root):
+    if root is None:
+        return 0
+    
+    if isinstance(root, list) or isinstance(root, str):
+        return 1  # Leaf nodes contribute a depth of 1
+    
+    if isinstance(root, dict):
+        max_depth = 0
+        for child in root.values():
+            child_depth = compute_tree_depth(child)
+            if child_depth > max_depth:
+                max_depth = child_depth
+        return 1 + max_depth  # Add 1 for the depth from the current node to its children
+
+    return 0
+
+
+def compute_clusters_embeddings(clusters, entity_embeddings, label2entity):
+    # Initialize dictionary to store embeddings
+    cluster_embeddings = {}
+    
+    def compute_cluster_embedding(cluster, embeddings_dict, cluster_id):
+        if isinstance(cluster, list):
+            # Base case: cluster is a list of entities
+            embeddings = [entity_embeddings.get(label2entity.get(entity)) for entity in cluster]
+            cluster_embedding = np.mean(embeddings, axis=0)
+            # print(f"Computed embedding for {cluster_id} with entities: {cluster}")
+            # print(f"Cluster embedding: {cluster_embedding}")
+        elif isinstance(cluster, dict):
+            # Recursive case: cluster has sub-clusters
+            sub_embeddings = []
+            for sub_cluster_id, sub_cluster in cluster.items():
+                sub_embedding = compute_cluster_embedding(sub_cluster, embeddings_dict, sub_cluster_id)
+                sub_embeddings.append(sub_embedding)
+            cluster_embedding = np.mean(sub_embeddings, axis=0)
+            # print(f"Computed embedding for {cluster_id} with sub-clusters: {list(cluster.keys())}")
+            # print(f"Parent cluster embeddings: {cluster_embedding}")
+
+        embeddings_dict[cluster_id] = cluster_embedding
+        return cluster_embedding
+    
+    for cluster_id, cluster_data in clusters.items():
+        compute_cluster_embedding(cluster_data, cluster_embeddings, cluster_id)
+        
+    return cluster_embeddings
