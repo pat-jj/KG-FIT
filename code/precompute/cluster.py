@@ -298,8 +298,13 @@ def labeling_hierarchy_to_entities(hierarchy, entity_info):
     for i in tqdm(range(len(leaf_values))):
         for entity_label in leaf_values[i]:
             entity_info[label2entity[entity_label]]['cluster'] = leaf_keys[i]
+            
             parent_path, _ = node2parentpath(hierarchy, leaf_keys[i])
             entity_info[label2entity[entity_label]]['parent_path'] = parent_path
+            
+            parent_map = map_child_to_parent(hierarchy)
+            nearest_clusters_lca = find_nearest_keys_lca_based(hierarchy, leaf_keys[i], parent_map, m=5)
+            entity_info[label2entity[entity_label]]['nearest_clusters_lca'] = nearest_clusters_lca
     
     return entity_info
     
@@ -372,8 +377,6 @@ def main():
             embs.append(emb)
         embs = np.array(embs)
         np.save(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.npy", embs)
-        
-        
     print("Done.")
     
     print("Start labeling hierarchy information to entities...")

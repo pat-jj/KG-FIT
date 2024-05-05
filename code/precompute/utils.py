@@ -282,6 +282,69 @@ def distance_between_keys(root, key1, key2):
     return distance1 + distance2 if distance1 != -1 and distance2 != -1 else -1
 
 
+def find_nearest_keys_lca_based(tree, input_key, parent_map, m=5):
+
+    def _find_distance(parent_map, key, root):
+        distance = 0
+        while key != root:
+            key = parent_map[key]
+            distance += 1
+        return distance
+
+
+    def _find_lca(parent_map, key1, key2):
+        ancestors = set()
+        # Climb up from key1 to the root, collecting all ancestors
+        while key1 in parent_map:
+            ancestors.add(key1)
+            key1 = parent_map.get(key1, None)  # Safely get parent or None if not exists
+            if key1 is None:
+                break
+        # Climb up from key2 until we find the first common ancestor
+        while key2 not in ancestors:
+            key2 = parent_map.get(key2, None)  # Safely get parent or None if not exists
+            if key2 is None:
+                return None  # If reached the top without finding an ancestor, return None
+        return key2
+
+    def _distance_between_keys(parent_map, key1, key2):
+        # Find root two levels above current key
+        root1 = parent_map.get(key1)
+        if root1:
+            root1 = parent_map.get(root1)
+        
+        root2 = parent_map.get(key2)
+        if root2:
+            root2 = parent_map.get(root2)
+
+        # Find LCA considering two levels up as the root
+        if root1 and root2:
+            lca = _find_lca(parent_map, key1, key2)
+            if lca:
+                distance1 = _find_distance(parent_map, key1, lca)
+                distance2 = _find_distance(parent_map, key2, lca)
+                return distance1 + distance2
+        return -1  # Return -1 if no valid LCA is found
+    
+    
+    all_keys = set(parent_map.keys())
+    distances = []
+    
+    for key in all_keys:
+        if key != input_key:
+            dist = _distance_between_keys(parent_map, input_key, key)
+            if dist != -1:  # Only consider valid distances
+                distances.append((key, dist))
+    
+    # Sort the list of distances based on distance, and return the first n keys
+    distances.sort(key=lambda x: x[1])
+    
+    if len(distances) < m:
+        return [key for key, dist in distances]
+    
+    return [key for key, dist in distances[:m]]
+
+
 def compute_tree_depth(root):
     if root is None:
         return 0

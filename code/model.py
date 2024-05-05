@@ -12,8 +12,12 @@ from sklearn.metrics        import average_precision_score
 
 class KGFIT(nn.Module):
     def __init__(self, model_name, nentity, nrelation, hidden_dim, gamma, 
-                 double_entity_embedding=False, double_relation_embedding=False,
-                 entity_hierarchy=None, entity_text_embeddings=None, rho=0.5, alpha=0.5, beta=0.5, gamma_1=1.0, gamma_2=1.0, lambda_1=1.0, lambda_2=1.0):
+                    double_entity_embedding=False, double_relation_embedding=False,
+                    entity_text_embeddings=None, cluster_embeddings=None, 
+                    rho=0.5, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
+                    zeta_1=0.5, zeta_2=0.5, zeta_3=0.5,
+                    ):
+        
         super(KGFIT, self).__init__()
         self.model_name = model_name
         self.nentity = nentity
@@ -50,6 +54,14 @@ class KGFIT(nn.Module):
             b=self.embedding_range.item()
         )
         
+        ent_text_emb, ent_desc_emb      = torch.chunk(entity_text_embeddings, 2, dim=1)
+        clus_text_emb, clus_desc_emb    = torch.chunk(cluster_embeddings, 2, dim=1)
+        
+        # concatenate ent_text_emb[:hidden_dim/2] and ent_desc_emb[:hidden_dim/2], size: (nentity, hidden_dim)
+        self.entity_text_embeddings = torch.cat([ent_text_emb[:, :hidden_dim//2], ent_desc_emb[:, :hidden_dim//2]], dim=1)
+        # concatenate clus_text_emb[:hidden_dim/2] and clus_desc_emb[:hidden_dim/2], size: (nentity, hidden_dim)
+        self.cluster_embeddings     = torch.cat([clus_text_emb[:, :hidden_dim//2], clus_desc_emb[:, :hidden_dim//2]], dim=1)
+        
         if model_name == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
         
@@ -63,258 +75,173 @@ class KGFIT(nn.Module):
         if model_name == 'ComplEx' and (not double_entity_embedding or not double_relation_embedding):
             raise ValueError('ComplEx should use --double_entity_embedding and --double_relation_embedding')
         
-        self.entity_hierarchy = entity_hierarchy
-        self.entity_text_embeddings = entity_text_embeddings
+        # Hyperparameters
         self.rho = rho              # Hyperparameter controlling the influence of the randomly initialized component in the embedding
-        self.alpha = alpha          # Weight for the hierarchical constraint
-        self.beta = beta            # Weight for the text embedding deviation constraint
-        self.gamma_1 = gamma_1      # Weight for the parent-child constraint
-        self.gamma_2 = gamma_2      # Weight for the link prediction constraint
-        self.lambda_1 = lambda_1    # Weight for the inter-cluster separation
-        self.lambda_2 = lambda_2    # Weight for the parent-child relationship preservation
         
-    def forward(self, sample, mode='single'):
+        self.lambda_1 = lambda_1    # Hyperparameter controlling the influence of the inter-level cluster separation
+        self.lambda_2 = lambda_2    # Hyperparameter controlling the influence of the hierarchical distance maintenance
+        self.lambda_3 = lambda_3    # Hyperparameter controlling the influence of the cluster cohesion
+        
+        self.zeta_1 = zeta_1        # Hyperparameter controlling the influence of the entire hierarchical constraint
+        self.zeta_2 = zeta_2        # Hyperparameter controlling the influence of the text embedding deviation
+        self.zeta_3 = zeta_3        # Hyperparameter controlling the influence of the link prediction score
+
+        
+    def forward(self, sample, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode='single'):
         if mode == 'single':
+            self_cluster_ids_head, self_cluster_ids_tail = self_cluster_ids
+            neighbor_clusters_ids_head, neighbor_clusters_ids_tail = neighbor_clusters_ids
+            parent_ids_head, parent_ids_tail = parent_ids
+            
+            # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation = torch.index_select(self.relation_embedding, dim=0, index=sample[:, 1]).unsqueeze(1)
-            
+            # positive head embeddings,         size: (batch_size, 1, hidden_dim)
             head_init = torch.index_select(self.entity_embedding_init, dim=0, index=sample[:, 0]).unsqueeze(1)
+            # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
             tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=sample[:, 2]).unsqueeze(1)
-            
+            # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 0]).unsqueeze(1)
+            # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 2]).unsqueeze(1)
+            # positive head cluster embeddings, size: (batch_size, 1, hidden_dim)
+            cluster_emb_head = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids_head).unsqueeze(1)
+            # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
+            cluster_emb_tail = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids_tail).unsqueeze(1)
+            # positive other clusters embeddings, size: (batch_size, len(neighbor_clusters_ids_head), hidden_dim)
+            neighbor_clusters_emb_head = torch.index_select(self.cluster_embeddings, dim=0, index=neighbor_clusters_ids_head).unsqueeze(1)
+            # positive other clusters embeddings, size: (batch_size, len(neighbor_clusters_ids_tail), hidden_dim)
+            neighbor_clusters_emb_tail = torch.index_select(self.cluster_embeddings, dim=0, index=neighbor_clusters_ids_tail).unsqueeze(1)
+            # head parent embeddings,           size: (batch_size, len(parent_ids), hidden_dim)
+            parent_emb_head = torch.index_select(self.cluster_embeddings, dim=0, index=parent_ids_head).unsqueeze(1)
+            # tail parent embeddings,           size: (batch_size, len(parent_ids), hidden_dim)
+            parent_emb_tail = torch.index_select(self.cluster_embeddings, dim=0, index=parent_ids_tail).unsqueeze(1)
             
-            # Combine entity embeddings with text embeddings and randomly initialized component 
-            head_combined = self.rho * head_init + (1 - self.rho) * head_text
-            tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
             
-            head_cluster = self.get_cluster_embedding(sample[:, 0], head_combined)
-            tail_cluster = self.get_cluster_embedding(sample[:, 2], tail_combined)
+            # Combine entity embeddings with text embeddings and randomly initialized component, size: (batch_size, 1, hidden_dim)
+            head_combined           =   self.rho * head_init + (1 - self.rho) * head_text
+            tail_combined           =   self.rho * tail_init + (1 - self.rho) * tail_text
             
-            head_parent_cluster = self.get_parent_cluster_embedding(sample[:, 0], head_combined)
-            tail_parent_cluster = self.get_parent_cluster_embedding(sample[:, 2], tail_combined)
+            # Text Embedding Deviation,         (lower -> better),     size: (batch_size, 1)
+            text_dist               =   self.distance(head_combined, head_text  ) + self.distance(tail_combined, tail_text  )
+
+            # Cluster Cohesion,                 (lower -> better),     size: (batch_size, 1)
+            self_cluster_dist       =   self.distance(head_combined, cluster_emb_head) + self.distance(tail_combined, cluster_emb_tail)
             
-            head_text_dist = self.distance(head_combined, head_text)
-            tail_text_dist = self.distance(tail_combined, tail_text)
+            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, 1)
+            neighbor_cluster_dist   =   self.distance(head_combined, neighbor_clusters_emb_head) + self.distance(tail_combined, neighbor_clusters_emb_tail)
             
-            # Compute intra-cluster distances
-            intra_cluster_dists = []
-            for cluster_embedding in torch.cat([head_cluster, tail_cluster], dim=0):
-                cluster_entities = self.entity_hierarchy[cluster_embedding]
-                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined, tail_combined], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
-                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
-                intra_cluster_dists.append(intra_cluster_dist)
-            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
+            #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, 1)
+            hier_dist = 0
+            for i in range(len(parent_emb_head)-1):
+                parent_embedding, parent_parent_embedding = parent_emb_head[i], parent_emb_head[i+1]
+                hier_dist           +=   (self.distance(head_combined, parent_parent_embedding) - self.distance(head_combined, parent_embedding)) / len(parent_emb_head)
+                
+            for i in range(len(parent_emb_tail)-1):
+                parent_embedding, parent_parent_embedding = parent_emb_tail[i], parent_emb_tail[i+1]
+                hier_dist           +=   (self.distance(tail_combined, parent_parent_embedding) - self.distance(tail_combined, parent_embedding)) / len(parent_emb_tail)
+                
+            # KGE Score (positive),               (lower -> better),     size: (batch_size, 1)
+            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
+                
             
-            # Compute inter-cluster distances
-            inter_cluster_dists = []
-            for i, cluster_embedding in enumerate(torch.cat([head_cluster, tail_cluster], dim=0)):
-                other_cluster_embeddings = torch.cat([head_cluster[:i], head_cluster[i+1:], tail_cluster[:i], tail_cluster[i+1:]], dim=0)
-                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
-                inter_cluster_dists.append(inter_cluster_dist)
-            inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
-            
-            # Compute parent-child distances
-            parent_child_dists = []
-            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster, tail_cluster], dim=0), torch.cat([head_parent_cluster, tail_parent_cluster], dim=0)):
-                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
-                parent_child_dists.append(parent_child_dist)
-            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
-            
-            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
-            
-            # Apply constraints 
-            score = - self.alpha * hierarchical_loss  # Hierarchical constraint 
-            score = score - self.beta * (head_text_dist + tail_text_dist)  # Text embedding deviation constraint 
-            
-            # Link prediction constraint (refined)
-            true_triple_score = self.score_func(head_combined, relation, tail_combined)
-            negative_tails = self.sample_negative_entities(sample[:, 2])
-            negative_tail_scores = self.score_func(head_combined, relation, negative_tails)
-            
-            score = score - (self.gamma_2 * (true_triple_score - torch.mean(negative_tail_scores, dim=1)))
             
         elif mode == 'head-batch':
-            tail_part, head_part = sample
+            head_part, tail_part = sample
             batch_size, negative_sample_size = head_part.size(0), head_part.size(1)
             
+            # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation = torch.index_select(self.relation_embedding, dim=0, index=tail_part[:, 1]).unsqueeze(1)
-            
-            head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
             tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part[:, 2]).unsqueeze(1)
-            
-            head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
+            head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part[:, 2]).unsqueeze(1)
+            # negative head text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
+            head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
+            cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
+            # positive other cluster embeddings, size: (batch_size, len(neighbor_clusters_ids), hidden_dim)
+            neighbor_cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=neighbor_clusters_ids).unsqueeze(1)
+            # tail parent embeddings,           size: (batch_size, len(parent_ids), hidden_dim)
+            parent_emb = torch.index_select(self.cluster_embeddings, dim=0, index=parent_ids).unsqueeze(1)
             
-            head_combined = self.rho * head_init + (1 - self.rho) * head_text
-            tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
+            # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
+            tail_combined           =   self.rho * tail_init + (1 - self.rho) * tail_text
+            # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
+            head_combined           =   self.rho * head_init + (1 - self.rho) * head_text
             
-            head_cluster = self.get_cluster_embedding(head_part.view(-1), head_combined).view(batch_size, negative_sample_size, -1)
-            tail_cluster = self.get_cluster_embedding(tail_part[:, 2], tail_combined)
+            # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
+            text_dist               =   self.distance(tail_combined, tail_text  )
+
+            # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
+            self_cluster_dist       =   self.distance(tail_combined, cluster_emb)
             
-            head_parent_cluster = self.get_parent_cluster_embedding(head_part.view(-1), head_combined).view(batch_size, negative_sample_size, -1)
-            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part[:, 2], tail_combined)
+            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, 1)
+            neighbor_cluster_dist   =   self.distance(tail_combined, neighbor_cluster_emb)
             
-            head_text_dist = self.distance(head_combined, head_text)
-            tail_text_dist = self.distance(tail_combined, tail_text)
+            #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, 1)
+            hier_dist = 0
+            for i in range(len(parent_emb)-1):
+                parent_embedding, parent_parent_embedding = parent_emb[i], parent_emb[i+1]
+                hier_dist           +=   (self.distance(tail_combined, parent_parent_embedding) - self.distance(tail_combined, parent_embedding)) / len(parent_emb)
+                
+            # KGE Score (negative heads),       (lower -> better),      size: (batch_size, negative_sample_size)
+            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
             
-            # Compute intra-cluster distances
-            intra_cluster_dists = []
-            for cluster_embedding in torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0):
-                cluster_entities = self.entity_hierarchy[cluster_embedding]
-                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined.view(-1, head_combined.size(-1)), tail_combined], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
-                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
-                intra_cluster_dists.append(intra_cluster_dist)
-            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
             
-            # Compute inter-cluster distances
-            inter_cluster_dists = []
-            for i, cluster_embedding in enumerate(torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0)):
-                other_cluster_embeddings = torch.cat([head_cluster.view(-1, head_cluster.size(-1))[:i], head_cluster.view(-1, head_cluster.size(-1))[i+1:], tail_cluster[:i], tail_cluster[i+1:]], dim=0)
-                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
-                inter_cluster_dists.append(inter_cluster_dist)
-            inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
-            
-            # Compute parent-child distances
-            parent_child_dists = []
-            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster.view(-1, head_cluster.size(-1)), tail_cluster], dim=0), torch.cat([head_parent_cluster.view(-1, head_parent_cluster.size(-1)), tail_parent_cluster], dim=0)):
-                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
-                parent_child_dists.append(parent_child_dist)
-            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
-            
-            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
-            
-            score = - self.alpha * hierarchical_loss
-            score = score - self.beta * (head_text_dist + tail_text_dist)
-            
-            true_triple_score = self.score_func(head_combined, relation, tail_combined)
-            negative_heads = self.sample_negative_entities(head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            negative_head_scores = self.score_func(negative_heads, relation, tail_combined)
-            
-            score = score - (self.gamma_2 * (true_triple_score - torch.mean(negative_head_scores, dim=1)))
             
         elif mode == 'tail-batch':
             head_part, tail_part = sample
             batch_size, negative_sample_size = tail_part.size(0), tail_part.size(1)
             
+            # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation = torch.index_select(self.relation_embedding, dim=0, index=head_part[:, 1]).unsqueeze(1)
-            
+            # positive head embeddings,         size: (batch_size, 1, hidden_dim)
             head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part[:, 0]).unsqueeze(1)
+            # negative tail embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
             tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            
+            # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part[:, 0]).unsqueeze(1)
+            # negative tail text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            # positive head cluster embeddings, size: (batch_size, 1, hidden_dim)
+            cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
+            # positive other cluster embeddings, size: (batch_size, len(neighbor_clusters_ids), hidden_dim)
+            neighbor_cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=neighbor_clusters_ids).unsqueeze(1)
+            # head parent embeddings,           size: (batch_size, len(parent_ids), hidden_dim)
+            parent_emb = torch.index_select(self.cluster_embeddings, dim=0, index=parent_ids).unsqueeze(1)
             
-            head_combined = self.rho * head_init + (1 - self.rho) * head_text
-            tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text
+            # positive head embeddings,        size: (batch_size, 1, hidden_dim)
+            head_combined = self.rho * head_init + (1 - self.rho) * head_text 
+            # negative tail embeddings,       size: (batch_size, negative_sample_size, hidden_dim)
+            tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text 
             
-            head_cluster = self.get_cluster_embedding(head_part[:, 0], head_combined)
-            tail_cluster = self.get_cluster_embedding(tail_part.view(-1), tail_combined).view(batch_size, negative_sample_size, -1)
+            # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
+            text_dist               =   self.distance(head_combined, head_text  )
             
-            head_parent_cluster = self.get_parent_cluster_embedding(head_part[:, 0], head_combined)
-            tail_parent_cluster = self.get_parent_cluster_embedding(tail_part.view(-1), tail_combined).view(batch_size, negative_sample_size, -1)
+            # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
+            self_cluster_dist       =   self.distance(head_combined, cluster_emb)
             
-            head_text_dist = self.distance(head_combined, head_text)
-            tail_text_dist = self.distance(tail_combined, tail_text)
+            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, 1)
+            neighbor_cluster_dist   =   self.distance(head_combined, neighbor_cluster_emb)
             
-            # Compute intra-cluster distances
-            intra_cluster_dists = []
-            for cluster_embedding in torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0):
-                cluster_entities = self.entity_hierarchy[cluster_embedding]
-                cluster_entity_embeddings = torch.index_select(torch.cat([head_combined, tail_combined.view(-1, tail_combined.size(-1))], dim=0), dim=0, index=torch.tensor(list(cluster_entities)))
-                intra_cluster_dist = torch.mean(self.distance(cluster_entity_embeddings, cluster_embedding))
-                intra_cluster_dists.append(intra_cluster_dist)
-            intra_cluster_loss = torch.mean(torch.stack(intra_cluster_dists))
+            #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, 1)
+            hier_dist = 0
+            for i in range(len(parent_emb)-1):
+                parent_embedding, parent_parent_embedding = parent_emb[i], parent_emb[i+1]
+                hier_dist           +=   (self.distance(head_combined, parent_parent_embedding) - self.distance(head_combined, parent_embedding)) / len(parent_emb)
             
-            # Compute inter-cluster distances
-            inter_cluster_dists = []
-            for i, cluster_embedding in enumerate(torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0)):
-                other_cluster_embeddings = torch.cat([head_cluster[:i], head_cluster[i+1:], tail_cluster.view(-1, tail_cluster.size(-1))[:i], tail_cluster.view(-1, tail_cluster.size(-1))[i+1:]], dim=0)
-                inter_cluster_dist = torch.min(self.distance(cluster_embedding, other_cluster_embeddings))
-                inter_cluster_dists.append(inter_cluster_dist)
-                inter_cluster_loss = torch.mean(torch.stack(inter_cluster_dists))
-
-            # Compute parent-child distances
-            parent_child_dists = []
-            for cluster_embedding, parent_cluster_embedding in zip(torch.cat([head_cluster, tail_cluster.view(-1, tail_cluster.size(-1))], dim=0), torch.cat([head_parent_cluster, tail_parent_cluster.view(-1, tail_parent_cluster.size(-1))], dim=0)):
-                parent_child_dist = self.distance(cluster_embedding, parent_cluster_embedding)
-                parent_child_dists.append(parent_child_dist)
-            parent_child_loss = torch.mean(torch.stack(parent_child_dists))
+            # KGE Score (negative tails),       (lower -> better),      size: (batch_size, negative_sample_size)
+            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
             
-            hierarchical_loss = intra_cluster_loss - self.lambda_1 * inter_cluster_loss + self.lambda_2 * parent_child_loss
-            
-            score = - self.alpha * hierarchical_loss
-            score = score - self.beta * (head_text_dist + tail_text_dist)
-            
-            true_triple_score = self.score_func(head_combined, relation, tail_combined)
-            negative_tails = self.sample_negative_entities(tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            negative_tail_scores = self.score_func(head_combined, relation, negative_tails)
-            
-            score = score - (self.gamma_2 * (true_triple_score - torch.mean(negative_tail_scores, dim=1)))
         
         else:
             raise ValueError('mode %s not supported' % mode)
         
-        return score
+        
+        return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score
 
-
-    def get_cluster_embedding(self, entities, entity_embeddings):
-        """
-        Compute the cluster center embeddings for the given entities based on the provided entity embeddings.
-        """
-        if isinstance(entities, torch.Tensor):
-            entities = entities.tolist()
-        
-        cluster_embeddings = []
-        for entity in entities:
-            cluster = self.entity_hierarchy[entity]
-            cluster_entities = list(cluster)
-            cluster_entity_indices = torch.tensor([entities.index(e) for e in cluster_entities])
-            cluster_entity_embeddings = torch.index_select(entity_embeddings, dim=0, index=cluster_entity_indices)
-            cluster_embedding = torch.mean(cluster_entity_embeddings, dim=0)
-            cluster_embeddings.append(cluster_embedding)
-        
-        cluster_embeddings = torch.stack(cluster_embeddings, dim=0)
-        return cluster_embeddings
-
-    def get_parent_cluster_embedding(self, entities, entity_embeddings):
-        """
-        Compute the parent cluster embeddings for the given entities based on the provided entity embeddings.
-        """
-        if isinstance(entities, torch.Tensor):
-            entities = entities.tolist()
-        
-        parent_cluster_embeddings = []
-        for entity in entities:
-            cluster = self.entity_hierarchy[entity]
-            parent_cluster = self.entity_hierarchy[cluster]
-            parent_cluster_entities = list(parent_cluster)
-            parent_cluster_entity_indices = torch.tensor([entities.index(e) for e in parent_cluster_entities])
-            parent_cluster_entity_embeddings = torch.index_select(entity_embeddings, dim=0, index=parent_cluster_entity_indices)
-            parent_cluster_embedding = torch.mean(parent_cluster_entity_embeddings, dim=0)
-            parent_cluster_embeddings.append(parent_cluster_embedding)
-        
-        parent_cluster_embeddings = torch.stack(parent_cluster_embeddings, dim=0)
-        return parent_cluster_embeddings
-
-    def sample_negative_entities(self, entities, num_samples=10):
-        """
-        Sample negative entities for the given entities.
-        """
-        if isinstance(entities, torch.Tensor):
-            entities = entities.tolist()
-        
-        batch_size = len(entities)
-        negative_entities = []
-        for i in range(batch_size):
-            entity_samples = []
-            while len(entity_samples) < num_samples:
-                negative_entity = torch.randint(0, self.nentity, (1,))
-                if negative_entity != entities[i]:
-                    entity_samples.append(negative_entity)
-            negative_entities.append(torch.cat(entity_samples, dim=0))
-        
-        negative_entities = torch.stack(negative_entities, dim=0)
-        return negative_entities
 
     def distance(self, embeddings1, embeddings2, metric='cosine'):
         """
