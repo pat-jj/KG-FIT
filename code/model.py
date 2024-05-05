@@ -14,8 +14,8 @@ class KGFIT(nn.Module):
     def __init__(self, model_name, nentity, nrelation, hidden_dim, gamma, 
                     double_entity_embedding=False, double_relation_embedding=False,
                     entity_text_embeddings=None, cluster_embeddings=None, 
-                    rho=0.5, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                    zeta_1=0.5, zeta_2=0.5, zeta_3=0.5,
+                    rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
+                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5,
                     ):
         
         super(KGFIT, self).__init__()
@@ -387,14 +387,15 @@ class KGFIT(nn.Module):
 
         optimizer.zero_grad()
 
-        positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
+        positive_sample, negative_sample, subsampling_weight, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode = next(train_iterator)
 
         if args.cuda:
             positive_sample = positive_sample.cuda()
             negative_sample = negative_sample.cuda()
             subsampling_weight = subsampling_weight.cuda()
 
-        negative_score = model((positive_sample, negative_sample), mode=mode)
+        text_dist_n, self_cluster_dist_n, neighbor_cluster_dist_n, hier_dist_n, negative_score = \
+            model((positive_sample, negative_sample), self_cluster_ids, neighbor_clusters_ids, parent_ids, mode=mode)
 
         if args.negative_adversarial_sampling:
             #In self-adversarial sampling, we do not apply back-propagation on the sampling weight
@@ -403,7 +404,8 @@ class KGFIT(nn.Module):
         else:
             negative_score = F.logsigmoid(-negative_score).mean(dim = 1)
 
-        positive_score = model(positive_sample, mode='single')
+        text_dist_p, self_cluster_dist_p, neighbor_cluster_dist_p, hier_dist_p, positive_score = \
+            model(positive_sample, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode='single')
 
         positive_score = F.logsigmoid(positive_score).squeeze(dim = 1)
 
@@ -414,6 +416,7 @@ class KGFIT(nn.Module):
             positive_sample_loss = - (subsampling_weight * positive_score).sum()/subsampling_weight.sum()
             negative_sample_loss = - (subsampling_weight * negative_score).sum()/subsampling_weight.sum()
 
+        ## Loss function
         loss = (positive_sample_loss + negative_sample_loss)/2
         
         if args.regularization != 0.0:
@@ -427,6 +430,13 @@ class KGFIT(nn.Module):
         else:
             regularization_log = {}
             
+        loss = \
+            model.zeta_3 * loss \
+            + model.zeta_1 * (model.lambda_1 * (self_cluster_dist_n + self_cluster_dist_p) \
+                              - model.lambda_2 * (neighbor_cluster_dist_n, neighbor_cluster_dist_p) \
+                              - model.lambda_3 * (hier_dist_n, hier_dist_p)) \
+            + model.zeta_2 * (text_dist_n + text_dist_p)
+                    
         loss.backward()
 
         optimizer.step()
@@ -463,12 +473,12 @@ class KGFIT(nn.Module):
                 sample = sample.cuda()
 
             with torch.no_grad():
-                y_score = model(sample).squeeze(1).cpu().numpy()
+                text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, y_score = model(sample, mode='single')
 
             y_true = np.array(y_true)
 
             #average_precision_score is the same as auc_pr
-            auc_pr = average_precision_score(y_true, y_score)
+            auc_pr = average_precision_score(y_true, y_score.squeeze(1).cpu().numpy())
 
             metrics = {'auc_pr': auc_pr}
             
@@ -510,7 +520,7 @@ class KGFIT(nn.Module):
 
             with torch.no_grad():
                 for test_dataset in test_dataset_list:
-                    for positive_sample, negative_sample, filter_bias, mode in test_dataset:
+                    for positive_sample, negative_sample, filter_bias, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode in test_dataset:
                         if args.cuda:
                             positive_sample = positive_sample.cuda()
                             negative_sample = negative_sample.cuda()
@@ -518,7 +528,7 @@ class KGFIT(nn.Module):
 
                         batch_size = positive_sample.size(0)
 
-                        score = model((positive_sample, negative_sample), mode)
+                        text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, score = model((positive_sample, negative_sample), self_cluster_ids, neighbor_clusters_ids, parent_ids, mode)
                         score += filter_bias
 
                         #Explicitly sort all the entities to ensure that there is no test exposure bias
