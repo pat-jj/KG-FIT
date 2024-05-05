@@ -391,3 +391,13 @@ def compute_clusters_embeddings(clusters, entity_embeddings, label2entity):
         compute_cluster_embedding(cluster_data, cluster_embeddings, cluster_id)
         
     return cluster_embeddings
+
+
+def sort_entity_embeddings(entity_embeddings_dict, entity2id):
+    id2entity = {v: k for k, v in entity2id.items()}
+    entity_embeddings = []
+    for i in range(len(entity2id)):
+        entity = id2entity[i]
+        entity_embeddings.append(entity_embeddings_dict[entity])
+        
+    return np.array(entity_embeddings)

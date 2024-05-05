@@ -10,7 +10,7 @@ from dataloader         import BidirectionalOneShotIterator
 def construct_args():
     parser = argparse.ArgumentParser(description='LAMAKE')
     # Data paths
-    parser.add_argument('--data_path', type=str, default='../data', help='Path to the dataset')
+    parser.add_argument('--data_path', type=str, default='data', help='Path to the dataset')
     parser.add_argument('--process_path', type=str, default='/data/pj20/lamake_data', help='Path to the entity hierarchy')
     parser.add_argument('--dataset', type=str, default='FB15K-237', help='Dataset name')
     parser.add_argument('--hierarchy_type', type=str, default='seed', choices=['seed', 'llm'],  help='Type of hierarchy to use')
@@ -40,24 +40,20 @@ def construct_args():
 
     # Model hyperparameters
     parser.add_argument('--model', type=str, default='TransE', help='Knowledge graph embedding model')
-    parser.add_argument('--hidden_dim', type=int, default=200, help='Embedding dimension')
-    parser.add_argument('--gamma', type=float, default=12.0, help='Margin for the score function')
+    
+    # Hyperparameters
     parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')
-    parser.add_argument('--alpha', type=float, default=0.5, help='Weight for the entity embeddings')
-    parser.add_argument('--beta', type=float, default=0.5, help='Weight for the hierarchical constraint')
-    parser.add_argument('--gamma_1', type=float, default=1.0, help='Weight for the text embedding deviation constraint')
-    parser.add_argument('--gamma_2', type=float, default=1.0, help='Weight for the parent-child constraint')
+    parser.add_argument('--lambda_1', type=float, default=0.5, help='Weight for the inter-level cluster separation')
+    parser.add_argument('--lambda_2', type=float, default=0.5, help='Weight for the hierarchical distance maintenance')
+    parser.add_argument('--lambda_3', type=float, default=0.5, help='Weight for the cluster cohesion')
+    parser.add_argument('--zeta_1', type=float, default=0.5, help='Weight for the entire hierarchical constraint')
+    parser.add_argument('--zeta_2', type=float, default=0.5, help='Weight for the text embedding deviation')
+    parser.add_argument('--zeta_3', type=float, default=0.5, help='Weight for the link prediction score')
     
     # Training settings
     parser.add_argument('--num_epochs', type=int, default=1000, help='Number of training epochs')
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size')
-    parser.add_argument('--neg_size', type=int, default=256, help='Negative sampling size')
-    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--early_stop', type=int, default=10, help='Number of epochs for early stopping')
-    parser.add_argument('--regularization', type=float, default=0.0, help='Regularization weight')
     parser.add_argument('--cuda', action='store_true', help='Use GPU for training')
-    parser.add_argument('--negative_adversarial_sampling', action='store_true', help='Use negative adversarial sampling')
-    parser.add_argument('--adversarial_temperature', type=float, default=1.0, help='Temperature for negative adversarial sampling')
     parser.add_argument('--uni_weight', action='store_true', help='Use uniform weight for positive and negative samples')
 
     parser.add_argument('-lr', '--learning_rate', default=0.0001, type=float)
@@ -82,6 +78,8 @@ def construct_args():
     
     return args
 
+args = construct_args()
+
 
 def main(args):
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
@@ -102,6 +100,7 @@ def main(args):
         for line in fin:
             eid, entity = line.strip().split('\t')
             entity2id[entity] = int(eid)
+        id2entity = {v: k for k, v in entity2id.items()}
             
     with open(os.path.join(args.data_path, 'relations.dict')) as fin:
         relation2id = dict()
@@ -126,30 +125,39 @@ def main(args):
     logging.info('#valid: %d' % len(valid_triples))
     test_triples  = read_triple(os.path.join(args.data_path, 'test.txt'),  entity2id, relation2id)
     logging.info('#test: %d' % len(test_triples))
+    entity_info_train = read_entity_info(os.path.join(f'{args.process_path}/{args.dataset}',\
+        f'entity_info_{args.hierarchy_type}_hier.json'), train_triples, id2entity)
+    entity_info_valid = read_entity_info(os.path.join(f'{args.process_path}/{args.dataset}',\
+        f'entity_info_{args.hierarchy_type}_hier.json'), valid_triples, id2entity)
+    entity_info_test = read_entity_info(os.path.join(f'{args.process_path}/{args.dataset}',\
+        f'entity_info_{args.hierarchy_type}_hier.json'), test_triples, id2entity)
     
     #All true triples
     all_true_triples = train_triples + valid_triples + test_triples
     
     # Load the entity hierarchy and text embeddings
-    entity_hierarchy = read_hierarchy(args)
     entity_text_embeddings = read_entity_initial_embedding(args)
+    # Load the cluster embeddings
+    cluster_embeddings = read_cluster_embeddings(args)
     
     ###### KG-FIT Model ######
     kgfit_model = KGFIT(
-        model_name=args.model,
+        base_model=args.model,
         nentity=nentity,
         nrelation=nrelation,
         hidden_dim=args.hidden_dim,
         gamma=args.gamma,
         double_entity_embedding=args.double_entity_embedding,
         double_relation_embedding=args.double_relation_embedding,
-        entity_hierarchy=entity_hierarchy,
         entity_text_embeddings=entity_text_embeddings,
+        cluster_embeddings=cluster_embeddings,
         rho=args.rho,
-        alpha=args.alpha,
-        beta=args.beta,
-        gamma_1=args.gamma_1,
-        gamma_2=args.gamma_2
+        lambda_1=args.lambda_1,
+        lambda_2=args.lambda_2,
+        lambda_3=args.lambda_3,
+        zeta_1=args.zeta_1,
+        zeta_2=args.zeta_2,
+        zeta_3=args.zeta_3,
     )
     ##########################
     
@@ -164,7 +172,7 @@ def main(args):
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch'), 
+            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, entity_info_train, 'head-batch'), 
             batch_size=args.batch_size,
             shuffle=True, 
             num_workers=max(1, args.cpu_num//2),
@@ -172,7 +180,7 @@ def main(args):
         )
         
         train_dataloader_tail = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'tail-batch'), 
+            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, entity_info_train, 'tail-batch'), 
             batch_size=args.batch_size,
             shuffle=True, 
             num_workers=max(1, args.cpu_num//2),

@@ -3,6 +3,7 @@ import numpy as np
 import os
 import torch
 import logging
+from tqdm import tqdm
 
 def read_hierarchy(args):
     """
@@ -15,13 +16,25 @@ def read_hierarchy(args):
 
 
 def read_entity_initial_embedding(args):
-    """
-    Read the initial entity embeddings from the json file.
-    """
-    file_path = f"{args.process_path}/{args.dataset}/entity_init_embeddings.json"
-    entity_initial_embedding = json.load(open(file_path, "r"))
-    
-    return entity_initial_embedding
+    """Read the initial entity embeddings from the json file."""
+    file_path = f"{args.process_path}/{args.dataset}/entity_init_embeddings.npy"
+    entity_init_embeddings = np.load(file_path)
+    # convert to tensor
+    entity_init_embeddings = torch.tensor(entity_init_embeddings, dtype=torch.float32)
+    if args.cuda:
+        entity_init_embeddings = entity_init_embeddings.cuda()
+    return entity_init_embeddings
+
+def read_cluster_embeddings(args):
+    """Read the cluster embeddings from the json file."""
+    file_path = f"{args.process_path}/{args.dataset}/clusters_embeddings_{args.hierarchy_type}.npy"
+    cluster_embeddings = np.load(file_path)
+    # convert to tensor
+    cluster_embeddings = torch.tensor(cluster_embeddings, dtype=torch.float32)
+    if args.cuda:
+        cluster_embeddings = cluster_embeddings.cuda()
+    return cluster_embeddings
+
 
 def save_model(model, optimizer, save_variable_list, args):
     '''
@@ -64,6 +77,32 @@ def read_triple(file_path, entity2id, relation2id):
             triples.append((entity2id[h], relation2id[r], entity2id[t]))
     return triples
 
+
+def read_entity_info(file_path, triples, id2entity):
+    '''
+    Read entity information from the file.
+    '''
+    entity_info = []
+    with open(file_path, 'r') as f:
+        info = json.load(f)
+        
+    for triple in tqdm(triples):
+        head = id2entity[triple[0]]
+        tail = id2entity[triple[2]]
+        cluster_id_head = info[head]['cluster']
+        neighbor_clusters_ids_head = info[head]['nearest_clusters_lca']
+        parent_ids_head = info[head]['parent_path']
+        cluster_id_tail = info[tail]['cluster']
+        neighbor_clusters_ids_tail = info[tail]['nearest_clusters_lca']
+        parent_ids_tail = info[tail]['parent_path']
+        
+        entity_info.append(
+            (cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, 
+             cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail)
+        )
+        
+    return entity_info
+        
 
 def set_logger(args):
     '''

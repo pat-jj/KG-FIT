@@ -294,17 +294,22 @@ def labeling_hierarchy_to_entities(hierarchy, entity_info):
     Label the hierarchy information to entities.
     """
     leaf_keys, leaf_values = find_leaves(hierarchy)
-    label2entity = {entity_info[entity]['text_label']: entity for entity in entity_info.keys()}
+    
+    label2entity = defaultdict(list)
+    for entity in entity_info.keys():
+        label2entity[entity_info[entity]['text_label']].append(entity)
+    
     for i in tqdm(range(len(leaf_values))):
         for entity_label in leaf_values[i]:
-            entity_info[label2entity[entity_label]]['cluster'] = leaf_keys[i]
-            
+            entities = label2entity[entity_label]
             parent_path, _ = node2parentpath(hierarchy, leaf_keys[i])
-            entity_info[label2entity[entity_label]]['parent_path'] = parent_path
-            
             parent_map = map_child_to_parent(hierarchy)
             nearest_clusters_lca = find_nearest_keys_lca_based(hierarchy, leaf_keys[i], parent_map, m=5)
-            entity_info[label2entity[entity_label]]['nearest_clusters_lca'] = nearest_clusters_lca
+            
+            for entity in entities:
+                entity_info[entity]['cluster'] = leaf_keys[i]
+                entity_info[entity]['parent_path'] = parent_path
+                entity_info[entity]['nearest_clusters_lca'] = nearest_clusters_lca
     
     return entity_info
     
@@ -385,8 +390,18 @@ def main():
         with open(f"{args.output_dir}/{args.dataset}/entity_info_seed_hier.json", 'w') as f:
             json.dump(entity_info_seed_hier, f, indent=4)
     print("Done.")
-            
     
+    if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.npy"):
+        print("Sort Entity Embeddings by ID...")
+        with open(f"{args.data_dir}/{args.dataset}/entities.dict", 'r') as fin:
+            entity2id = dict()
+            for line in fin:
+                eid, entity = line.strip().split('\t')
+                entity2id[entity] = int(eid)
+        sorted_entity_embeddings = sort_entity_embeddings(entity_embeddings_dict=entity_embeddings, entity2id=entity2id)
+        # save the sorted entity embeddings
+        np.save(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.npy", sorted_entity_embeddings)
+        
     
     
     
