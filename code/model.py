@@ -617,7 +617,7 @@ class KGFIT(nn.Module):
                     if args.cuda:
                         positive_sample = positive_sample.cuda()
                         negative_sample = negative_sample.cuda()
-                        subsampling_weight = subsampling_weight.cuda()
+                        filter_bias = filter_bias.cuda()
                         cluster_id_head = cluster_id_head.cuda()
                         cluster_id_tail = cluster_id_tail.cuda()
                         neighbor_clusters_ids_head = neighbor_clusters_ids_head.cuda()

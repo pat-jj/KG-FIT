@@ -105,4 +105,4 @@ venv.bak/
 
 
 *.key
-wandb
+wandb/
