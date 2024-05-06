@@ -53,7 +53,7 @@ def save_model(model, optimizer, save_variable_list, args):
         os.path.join(args.save_path, 'checkpoint')
     )
     
-    entity_embedding = model.entity_embedding.detach().cpu().numpy()
+    entity_embedding = model.get_entity_embedding().detach().cpu().numpy()
     np.save(
         os.path.join(args.save_path, 'entity_embedding'), 
         entity_embedding

@@ -159,6 +159,7 @@ class TestDataset(Dataset):
         self.nentity = nentity
         self.nrelation = nrelation
         self.mode = mode
+        self.entity_info = entity_info
 
     def __len__(self):
         return self.len
@@ -189,18 +190,37 @@ class TestDataset(Dataset):
     
     @staticmethod
     def collate_fn(data):
+        # size of positive sample: (batch_size, 3)
         positive_sample = torch.stack([_[0] for _ in data], dim=0)
+        # size of negative sample: (batch_size, nentity)
         negative_sample = torch.stack([_[1] for _ in data], dim=0)
+        # size of filter_bias: (batch_size, nentity)
         filter_bias = torch.stack([_[2] for _ in data], dim=0)
+        # size of cluster_id_head: (batch_size, 1)
         cluster_id_head = torch.tensor([_[3] for _ in data])
+        # size of neighbor_clusters_ids_head: (batch_size, max_num_neighbor_clusters)
         neighbor_clusters_ids_head = [torch.LongTensor(_[4]) for _ in data]
+        max_len_neighbor_head = max(len(ids) for ids in neighbor_clusters_ids_head)
+        padded_neighbor_clusters_ids_head = torch.stack([torch.nn.functional.pad(ids, (0, max_len_neighbor_head - len(ids)), value=-1) for ids in neighbor_clusters_ids_head])
+        # size of parent_ids_head: (batch_size, max_num_parent_nodes)
+        # size of parent_ids_tail: (batch_size, max_num_parent_nodes)
         parent_ids_head = [torch.LongTensor(_[5]) for _ in data]
-        cluster_id_tail = torch.tensor([_[6] for _ in data])
-        neighbor_clusters_ids_tail = [torch.LongTensor(_[7]) for _ in data]
+        max_len_parent_head = max(len(ids) for ids in parent_ids_head)
         parent_ids_tail = [torch.LongTensor(_[8]) for _ in data]
+        max_len_parent_tail = max(len(ids) for ids in parent_ids_tail)
+        max_len_parent = max(max_len_parent_head, max_len_parent_tail)
+        padded_parent_ids_head = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent - len(ids)), value=-1) for ids in parent_ids_head])
+        padded_parent_ids_tail = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent - len(ids)), value=-1) for ids in parent_ids_tail])
+        # size of cluster_id_tail: (batch_size, 1)
+        cluster_id_tail = torch.tensor([_[6] for _ in data])
+        # size of neighbor_clusters_ids_tail: (batch_size, max_num_neighbor_clusters)
+        neighbor_clusters_ids_tail = [torch.LongTensor(_[7]) for _ in data]
+        max_len_neighbor_tail = max(len(ids) for ids in neighbor_clusters_ids_tail)
+        padded_neighbor_clusters_ids_tail = torch.stack([torch.nn.functional.pad(ids, (0, max_len_neighbor_tail - len(ids)), value=-1) for ids in neighbor_clusters_ids_tail])
+        
         mode = data[0][9]
         return positive_sample, negative_sample, filter_bias, cluster_id_head, cluster_id_tail, \
-            neighbor_clusters_ids_head, neighbor_clusters_ids_tail, parent_ids_head, parent_ids_tail, mode
+            padded_neighbor_clusters_ids_head, padded_neighbor_clusters_ids_tail, padded_parent_ids_head, padded_parent_ids_tail, mode
     
 class BidirectionalOneShotIterator(object):
     def __init__(self, dataloader_head, dataloader_tail):

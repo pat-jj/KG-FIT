@@ -1,4 +1,5 @@
 import argparse
+import wandb
 
 from torch.utils.data   import DataLoader
 from utils              import *
@@ -7,8 +8,9 @@ from dataloader         import TrainDataset
 from dataloader         import BidirectionalOneShotIterator
 
 
+
 def construct_args():
-    parser = argparse.ArgumentParser(description='LAMAKE')
+    parser = argparse.ArgumentParser(description='KG-FIT')
     # Data paths
     parser.add_argument('--data_path', type=str, default='data', help='Path to the dataset')
     parser.add_argument('--process_path', type=str, default='/data/pj20/lamake_data', help='Path to the entity hierarchy')
@@ -80,8 +82,15 @@ def construct_args():
 
 args = construct_args()
 
+def log_metrics(mode, step, metrics):
+    wandb.log({f"{mode}_{k}": v for k, v in metrics.items()}, step=step)
+    print(f"{mode} step {step}: {metrics}")
 
 def main(args):
+    wandb.init(project="kgfit", config=args)
+    loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss",
+                                      "text_dist_p", "self_cluster_dist_p", "neighbor_cluster_dist_p", "hier_dist_p", "positive_sample_loss", "loss"])
+    
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
         raise ValueError('one of train/val/test mode must be choosed.')
     if args.init_checkpoint:
@@ -159,6 +168,7 @@ def main(args):
         zeta_2=args.zeta_2,
         zeta_3=args.zeta_3,
     )
+    wandb.watch(kgfit_model)
     ##########################
     
     logging.info('Model Parameter Configuration:')
@@ -240,6 +250,22 @@ def main(args):
             log = kgfit_model.train_step(kgfit_model, optimizer, train_iterator, args)
             
             training_logs.append(log)
+            loss_table.add_data(
+                log['loss'],
+                log['text_dist_n'],
+                log['self_cluster_dist_n'],
+                log['neighbor_cluster_dist_n'],
+                log['hier_dist_n'],
+                log['negative_sample_loss'],
+                log['text_dist_p'],
+                log['self_cluster_dist_p'],
+                log['neighbor_cluster_dist_p'],
+                log['hier_dist_p'],
+                log['positive_sample_loss']
+            )
+        
+            wandb.log({"loss_details": loss_table}, step=step)
+    
             
             if step >= warm_up_steps:
                 current_learning_rate = current_learning_rate / 10
@@ -267,7 +293,7 @@ def main(args):
                 
             if args.do_valid and step % args.valid_steps == 0:
                 logging.info('Evaluating on Valid Dataset...')
-                metrics = kgfit_model.test_step(kgfit_model, valid_triples, all_true_triples, args)
+                metrics = kgfit_model.test_step(kgfit_model, valid_triples, all_true_triples, entity_info_valid, args)
                 log_metrics('Valid', step, metrics)
         
         save_variable_list = {
@@ -276,6 +302,7 @@ def main(args):
             'warm_up_steps': warm_up_steps
         }
         save_model(kgfit_model, optimizer, save_variable_list, args)
+        wandb.save(args.save_path)
     
     ######################
     
@@ -283,18 +310,21 @@ def main(args):
         
     if args.do_valid:
         logging.info('Evaluating on Valid Dataset...')
-        metrics = kgfit_model.test_step(kgfit_model, valid_triples, all_true_triples, args)
+        metrics = kgfit_model.test_step(kgfit_model, valid_triples, all_true_triples, entity_info_valid, args)
         log_metrics('Valid', step, metrics)
+        wandb.log({f"Valid_{k}": v for k, v in metrics.items()}, step=step)
     
     if args.do_test:
         logging.info('Evaluating on Test Dataset...')
-        metrics = kgfit_model.test_step(kgfit_model, test_triples, all_true_triples, args)
+        metrics = kgfit_model.test_step(kgfit_model, test_triples, all_true_triples, entity_info_test, args)
         log_metrics('Test', step, metrics)
+        wandb.log({f"Test_{k}": v for k, v in metrics.items()}, step=step)
     
     if args.evaluate_train:
         logging.info('Evaluating on Training Dataset...')
-        metrics = kgfit_model.test_step(kgfit_model, train_triples, all_true_triples, args)
+        metrics = kgfit_model.test_step(kgfit_model, train_triples, all_true_triples, entity_info_train, args)
         log_metrics('Test', step, metrics)
+        wandb.log({f"Train_{k}": v for k, v in metrics.items()}, step=step)
     
     ######################
         

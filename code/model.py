@@ -114,7 +114,15 @@ class KGFIT(nn.Module):
         # Place selected embeddings back into the appropriate locations
         masked_embeddings.view(-1, embeddings.shape[1])[valid_mask.view(-1)] = selected_embeddings
         return masked_embeddings
-
+    
+    
+    def get_entity_embedding(self):
+        """
+        Retrieve the embedding for the given entity ID.
+        """
+        # size: (nentity, self.entity_dim)
+        return self.rho * self.entity_embedding_init + (1 - self.rho) * self.entity_text_embeddings
+    
 
     def forward(self, sample, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode='single'):
         if mode == 'single':
@@ -540,119 +548,128 @@ class KGFIT(nn.Module):
             'negative_sample_loss': negative_sample_loss.item(),
             'loss': loss.item()
         }
+        
+        loss_details = {
+            'text_dist_n': text_dist_n.mean().item(),
+            'self_cluster_dist_n': self_cluster_dist_n.mean().item(),
+            'neighbor_cluster_dist_n': neighbor_cluster_dist_n.mean().item(),
+            'hier_dist_n': hier_dist_n.mean().item(),
+            'text_dist_p': text_dist_p.mean().item(),
+            'self_cluster_dist_p': self_cluster_dist_p.mean().item(),
+            'neighbor_cluster_dist_p': neighbor_cluster_dist_p.mean().item(),
+            'hier_dist_p': hier_dist_p.mean().item(),
+        }
+        
+        log.update(loss_details)
 
         return log
     
     @staticmethod
-    def test_step(model, test_triples, all_true_triples, args):
+    def test_step(model, test_triples, all_true_triples, entity_info, args):
         '''
         Evaluate the model on test or valid datasets
         '''
         
         model.eval()
+    
+        #Prepare dataloader for evaluation
+        test_dataloader_head = DataLoader(
+            TestDataset(
+                test_triples, 
+                all_true_triples, 
+                args.nentity, 
+                args.nrelation, 
+                entity_info,
+                'head-batch'
+            ), 
+            batch_size=args.test_batch_size,
+            num_workers=max(1, args.cpu_num//2), 
+            collate_fn=TestDataset.collate_fn
+        )
+
+        test_dataloader_tail = DataLoader(
+            TestDataset(
+                test_triples, 
+                all_true_triples, 
+                args.nentity, 
+                args.nrelation, 
+                entity_info,
+                'tail-batch'
+            ), 
+            batch_size=args.test_batch_size,
+            num_workers=max(1, args.cpu_num//2), 
+            collate_fn=TestDataset.collate_fn
+        )
         
-        if args.countries:
-            #Countries S* datasets are evaluated on AUC-PR
-            #Process test data for AUC-PR evaluation
-            sample = list()
-            y_true  = list()
-            for head, relation, tail in test_triples:
-                for candidate_region in args.regions:
-                    y_true.append(1 if candidate_region == tail else 0)
-                    sample.append((head, relation, candidate_region))
+        test_dataset_list = [test_dataloader_head, test_dataloader_tail]
+        
+        logs = []
 
-            sample = torch.LongTensor(sample)
-            if args.cuda:
-                sample = sample.cuda()
+        step = 0
+        total_steps = sum([len(dataset) for dataset in test_dataset_list])
 
-            with torch.no_grad():
-                text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, y_score = model(sample, mode='single')
+        with torch.no_grad():
+            for test_dataset in test_dataset_list:
+                for positive_sample, negative_sample, filter_bias, cluster_id_head, cluster_id_tail, \
+                    neighbor_clusters_ids_head, neighbor_clusters_ids_tail, parent_ids_head, \
+                        parent_ids_tail, mode in test_dataset:
+                            
+                    if args.cuda:
+                        positive_sample = positive_sample.cuda()
+                        negative_sample = negative_sample.cuda()
+                        subsampling_weight = subsampling_weight.cuda()
+                        cluster_id_head = cluster_id_head.cuda()
+                        cluster_id_tail = cluster_id_tail.cuda()
+                        neighbor_clusters_ids_head = neighbor_clusters_ids_head.cuda()
+                        neighbor_clusters_ids_tail = neighbor_clusters_ids_tail.cuda()
+                        parent_ids_head = parent_ids_head.cuda()
+                        parent_ids_tail = parent_ids_tail.cuda()
 
-            y_true = np.array(y_true)
+                    batch_size = positive_sample.size(0)
+                    
+                    ## Negative Samples
+                    if mode == 'head-batch':
+                        self_cluster_ids = cluster_id_tail
+                        neighbor_clusters_ids = neighbor_clusters_ids_tail
+                        parent_ids = parent_ids_tail
+                        
+                    elif mode == 'tail-batch':
+                        self_cluster_ids = cluster_id_head
+                        neighbor_clusters_ids = neighbor_clusters_ids_head
+                        parent_ids = parent_ids_head
 
-            #average_precision_score is the same as auc_pr
-            auc_pr = average_precision_score(y_true, y_score.squeeze(1).cpu().numpy())
+                    text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, score = model((positive_sample, negative_sample), self_cluster_ids, neighbor_clusters_ids, parent_ids, mode)
+                    score += filter_bias
 
-            metrics = {'auc_pr': auc_pr}
-            
-        else:
-            #Otherwise use standard (filtered) MRR, MR, HITS@1, HITS@3, and HITS@10 metrics
-            #Prepare dataloader for evaluation
-            test_dataloader_head = DataLoader(
-                TestDataset(
-                    test_triples, 
-                    all_true_triples, 
-                    args.nentity, 
-                    args.nrelation, 
-                    'head-batch'
-                ), 
-                batch_size=args.test_batch_size,
-                num_workers=max(1, args.cpu_num//2), 
-                collate_fn=TestDataset.collate_fn
-            )
+                    #Explicitly sort all the entities to ensure that there is no test exposure bias
+                    argsort = torch.argsort(score, dim = 1, descending=True)
 
-            test_dataloader_tail = DataLoader(
-                TestDataset(
-                    test_triples, 
-                    all_true_triples, 
-                    args.nentity, 
-                    args.nrelation, 
-                    'tail-batch'
-                ), 
-                batch_size=args.test_batch_size,
-                num_workers=max(1, args.cpu_num//2), 
-                collate_fn=TestDataset.collate_fn
-            )
-            
-            test_dataset_list = [test_dataloader_head, test_dataloader_tail]
-            
-            logs = []
+                    if mode == 'head-batch':
+                        positive_arg = positive_sample[:, 0]
+                    elif mode == 'tail-batch':
+                        positive_arg = positive_sample[:, 2]
+                    else:
+                        raise ValueError('mode %s not supported' % mode)
 
-            step = 0
-            total_steps = sum([len(dataset) for dataset in test_dataset_list])
+                    for i in range(batch_size):
+                        #Notice that argsort is not ranking
+                        ranking = (argsort[i, :] == positive_arg[i]).nonzero()
+                        assert ranking.size(0) == 1
 
-            with torch.no_grad():
-                for test_dataset in test_dataset_list:
-                    for positive_sample, negative_sample, filter_bias, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode in test_dataset:
-                        if args.cuda:
-                            positive_sample = positive_sample.cuda()
-                            negative_sample = negative_sample.cuda()
-                            filter_bias = filter_bias.cuda()
+                        #ranking + 1 is the true ranking used in evaluation metrics
+                        ranking = 1 + ranking.item()
+                        logs.append({
+                            'MRR': 1.0/ranking,
+                            'MR': float(ranking),
+                            'HITS@1': 1.0 if ranking <= 1 else 0.0,
+                            'HITS@5': 1.0 if ranking <= 5 else 0.0,
+                            'HITS@10': 1.0 if ranking <= 10 else 0.0,
+                        })
 
-                        batch_size = positive_sample.size(0)
+                    if step % args.test_log_steps == 0:
+                        logging.info('Evaluating the model... (%d/%d)' % (step, total_steps))
 
-                        text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, score = model((positive_sample, negative_sample), self_cluster_ids, neighbor_clusters_ids, parent_ids, mode)
-                        score += filter_bias
-
-                        #Explicitly sort all the entities to ensure that there is no test exposure bias
-                        argsort = torch.argsort(score, dim = 1, descending=True)
-
-                        if mode == 'head-batch':
-                            positive_arg = positive_sample[:, 0]
-                        elif mode == 'tail-batch':
-                            positive_arg = positive_sample[:, 2]
-                        else:
-                            raise ValueError('mode %s not supported' % mode)
-
-                        for i in range(batch_size):
-                            #Notice that argsort is not ranking
-                            ranking = (argsort[i, :] == positive_arg[i]).nonzero()
-                            assert ranking.size(0) == 1
-
-                            #ranking + 1 is the true ranking used in evaluation metrics
-                            ranking = 1 + ranking.item()
-                            logs.append({
-                                'MRR': 1.0/ranking,
-                                'MR': float(ranking),
-                                'HITS@1': 1.0 if ranking <= 1 else 0.0,
-                                'HITS@5': 1.0 if ranking <= 5 else 0.0,
-                                'HITS@10': 1.0 if ranking <= 10 else 0.0,
-                            })
-
-                        if step % args.test_log_steps == 0:
-                            logging.info('Evaluating the model... (%d/%d)' % (step, total_steps))
-
-                        step += 1
+                    step += 1
 
             metrics = {}
             for metric in logs[0].keys():

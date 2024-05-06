@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=5,6,7 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=5,7 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
