@@ -197,28 +197,21 @@ class KGFIT(nn.Module):
             
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=tail_part[:, 1]).unsqueeze(1)
-            print(f"Size of relation: {relation.size()}")
             # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
             tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part[:, 2]).unsqueeze(1)
-            print(f"Size of tail_init: {tail_init.size()}")
             # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
             head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            print(f"Size of head_init: {head_init.size()}")
             # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part[:, 2]).unsqueeze(1)
-            print(f"Size of tail_text: {tail_text.size()}")
             # negative head text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            print(f"Size of head_text: {head_text.size()}")
             # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
-            print(f"Size of cluster_emb: {cluster_emb.size()}")
             # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
             neighbor_cluster_emb = self.get_masked_embeddings(
                 neighbor_clusters_ids, self.cluster_embeddings,
                 (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.hidden_dim)
             )
-            print(f"Size of neighbor_cluster_emb: {neighbor_cluster_emb.size()}")
             # positive parent embeddings, size: (batch_size, max_parent_num, hidden_dim)
             parent_emb = self.get_masked_embeddings(
                 parent_ids, self.cluster_embeddings,
@@ -227,10 +220,8 @@ class KGFIT(nn.Module):
             
             # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
             tail_combined           =   self.rho * tail_init + (1 - self.rho) * tail_text
-            print(f"Size of tail_combined: {tail_combined.size()}")
             # # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
             head_combined           =   self.rho * head_init + (1 - self.rho) * head_text
-            print(f"Size of head_combined: {head_combined.size()}")
             
             # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
             text_dist               =   self.distance(tail_combined, tail_text  )
@@ -263,41 +254,31 @@ class KGFIT(nn.Module):
             
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=head_part[:, 1]).unsqueeze(1)
-            print(f"Size of relation: {relation.size()}")
             # positive head embeddings,         size: (batch_size, 1, hidden_dim)
             head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part[:, 0]).unsqueeze(1)
-            print(f"Size of head_init: {head_init.size()}")
             # negative tail embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
             tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            print(f"Size of tail_init: {tail_init.size()}")
             # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part[:, 0]).unsqueeze(1)
-            print(f"Size of head_text: {head_text.size()}")
             # negative tail text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            print(f"Size of tail_text: {tail_text.size()}")
             # positive head cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
-            print(f"Size of cluster_emb: {cluster_emb.size()}")
             # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
             neighbor_cluster_emb = self.get_masked_embeddings(
                 neighbor_clusters_ids, self.cluster_embeddings,
                 (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.hidden_dim)
             )
-            print(f"Size of neighbor_cluster_emb: {neighbor_cluster_emb.size()}")
             # positive parent embeddings, size: (batch_size, max_parent_num, hidden_dim)
             parent_emb = self.get_masked_embeddings(
                 parent_ids, self.cluster_embeddings,
                 (parent_ids.size(0), parent_ids.size(1), self.hidden_dim)
             )
-            print(f"Size of parent_emb: {parent_emb.size()}")
             
             # positive head embeddings,        size: (batch_size, 1, hidden_dim)
             head_combined = self.rho * head_init + (1 - self.rho) * head_text 
-            print(f"Size of head_combined: {head_combined.size()}")
             # negative tail embeddings,       size: (batch_size, negative_sample_size, hidden_dim)
             tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text 
-            print(f"Size of tail_combined: {tail_combined.size()}")
             
             # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
             text_dist               =   self.distance(head_combined, head_text  )

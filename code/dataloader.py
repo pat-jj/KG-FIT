@@ -87,19 +87,21 @@ class TrainDataset(ABC):
         max_len_neighbor_head = max(len(ids) for ids in neighbor_clusters_ids_head)
         padded_neighbor_clusters_ids_head = torch.stack([torch.nn.functional.pad(ids, (0, max_len_neighbor_head - len(ids)), value=-1) for ids in neighbor_clusters_ids_head])
         # size of parent_ids_head: (batch_size, max_num_parent_nodes)
+        # size of parent_ids_tail: (batch_size, max_num_parent_nodes)
         parent_ids_head = [torch.LongTensor(_[5]) for _ in data]
         max_len_parent_head = max(len(ids) for ids in parent_ids_head)
-        padded_parent_ids_head = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent_head - len(ids)), value=-1) for ids in parent_ids_head])
+        parent_ids_tail = [torch.LongTensor(_[8]) for _ in data]
+        max_len_parent_tail = max(len(ids) for ids in parent_ids_tail)
+        max_len_parent = max(max_len_parent_head, max_len_parent_tail)
+        padded_parent_ids_head = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent - len(ids)), value=-1) for ids in parent_ids_head])
+        padded_parent_ids_tail = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent - len(ids)), value=-1) for ids in parent_ids_tail])
         # size of cluster_id_tail: (batch_size, 1)
         cluster_id_tail = torch.tensor([_[6] for _ in data])
         # size of neighbor_clusters_ids_tail: (batch_size, max_num_neighbor_clusters)
         neighbor_clusters_ids_tail = [torch.LongTensor(_[7]) for _ in data]
         max_len_neighbor_tail = max(len(ids) for ids in neighbor_clusters_ids_tail)
         padded_neighbor_clusters_ids_tail = torch.stack([torch.nn.functional.pad(ids, (0, max_len_neighbor_tail - len(ids)), value=-1) for ids in neighbor_clusters_ids_tail])
-        # size of parent_ids_tail: (batch_size, max_num_parent_nodes)
-        parent_ids_tail = [torch.LongTensor(_[8]) for _ in data]
-        max_len_parent_tail = max(len(ids) for ids in parent_ids_tail)
-        padded_parent_ids_tail = torch.stack([torch.nn.functional.pad(ids, (0, max_len_parent_tail - len(ids)), value=-1) for ids in parent_ids_tail])
+
         mode = data[0][9]
         return positive_sample, negative_sample, subsample_weight, cluster_id_head, cluster_id_tail, \
             padded_neighbor_clusters_ids_head, padded_neighbor_clusters_ids_tail, padded_parent_ids_head, padded_parent_ids_tail, mode
