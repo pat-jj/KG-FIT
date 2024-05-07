@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.csv
 
 # C extensions
 *.so
@@ -106,3 +107,4 @@ venv.bak/
 
 *.key
 wandb/
+plot/

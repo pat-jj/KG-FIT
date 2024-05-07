@@ -15,7 +15,7 @@ class KGFIT(nn.Module):
                     double_entity_embedding=False, double_relation_embedding=False,
                     entity_text_embeddings=None, cluster_embeddings=None, 
                     rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5,
+                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',
                     ):
         
         super(KGFIT, self).__init__()
@@ -24,6 +24,7 @@ class KGFIT(nn.Module):
         self.nrelation = nrelation
         self.hidden_dim = hidden_dim
         self.epsilon = 2.0
+        self.distance_metric = distance_metric
         
         self.gamma = nn.Parameter(
             torch.Tensor([gamma]), 
@@ -114,7 +115,6 @@ class KGFIT(nn.Module):
         # Place selected embeddings back into the appropriate locations
         masked_embeddings.view(-1, embeddings.shape[1])[valid_mask.view(-1)] = selected_embeddings
         return masked_embeddings
-    
     
     def get_entity_embedding(self):
         """
@@ -313,13 +313,13 @@ class KGFIT(nn.Module):
         
         return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score 
 
-    def distance(self, embeddings1, embeddings2, metric='cosine'):
+    def distance(self, embeddings1, embeddings2):
         """
         Compute the distance between two sets of embeddings.
         """
-        if metric == 'euclidean':
+        if self.distance_metric == 'euclidean':
             return torch.norm(embeddings1 - embeddings2, p=2, dim=-1)
-        elif metric == 'cosine':
+        elif self.distance_metric == 'cosine':
             embeddings1_norm = F.normalize(embeddings1, p=2, dim=-1)
             embeddings2_norm = F.normalize(embeddings2, p=2, dim=-1)
             cosine_similarity = torch.sum(embeddings1_norm * embeddings2_norm, dim=-1)

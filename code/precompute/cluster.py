@@ -38,7 +38,8 @@ def generate_entity_description(entity, hint=None):
     if hint:
         prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\napple is a round fruit with red, green, or yellow skin and crisp, juicy flesh.\n\nHINT:{hint}\n\nNow, describe {entity}:"
     else:
-        prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\napple is a round fruit with red, green, or yellow skin and crisp, juicy flesh.\n\nNow, describe {entity}:"
+        # prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\napple is a round fruit with red, green, or yellow skin and crisp, juicy flesh.\n\nNow, describe {entity}:"
+        prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\nBill Gates is a technology magnate, philanthropist, and co-founder of Microsoft Corporation, known for his significant contributions to the personal computing industry.\n\nNow, describe {entity}:"
 
     response = gpt_chat_return_response(model="gpt-3.5-turbo-0125", prompt=prompt)
     description = response.choices[0].message.content.strip()
@@ -259,33 +260,47 @@ def read_entities(path):
     return entities
 
 def create_entity_info_emb_dict(args, entities):
-    ori_info_path = f"{args.data_dir}/{args.dataset}/entity2info.json"
-    entity2label_path = f"{args.data_dir}/{args.dataset}/entity2label.txt"
-    entity2label = {}
-    with open(ori_info_path, 'r') as f:
-        ori_info = json.load(f)
-    with open(entity2label_path, 'r') as f:
-        lines = f.readlines()
-    for line in lines:
-        entity, label = line.strip().split("\t")
-        entity2label[entity] = label
-    
-    entity_info = {}
-    entity_embeddings = {}
-    for entity in entities:
-        if entity not in ori_info:
+    if args.dataset == "FB15K-237":
+        ori_info_path = f"{args.data_dir}/{args.dataset}/entity2info.json"
+        entity2label_path = f"{args.data_dir}/{args.dataset}/entity2label.txt"
+        entity2label = {}
+        with open(ori_info_path, 'r') as f:
+            ori_info = json.load(f)
+        with open(entity2label_path, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            entity, label = line.strip().split("\t")
+            entity2label[entity] = label
+        
+        entity_info = {}
+        entity_embeddings = {}
+        for entity in entities:
+            if entity not in ori_info:
+                entity_info[entity] = {
+                    "text_label": entity2label[entity],
+                    "original_description": None,
+                    "llm_description": None
+                }
+            else:
+                entity_info[entity] = {
+                    "text_label": ori_info[entity]["label"],
+                    "original_description": ori_info[entity]["description"] if "description" in ori_info[entity] else None,
+                    "llm_description": None
+                }
+            entity_embeddings[entity] = None
+            
+    elif args.dataset == "YAGO3-10":
+        entity2label = {entity: entity.replace("_", " ") for entity in entities}
+        entity_info = {}
+        entity_embeddings = {}
+        for entity in entities:
             entity_info[entity] = {
                 "text_label": entity2label[entity],
                 "original_description": None,
                 "llm_description": None
             }
-        else:
-            entity_info[entity] = {
-                "text_label": ori_info[entity]["label"],
-                "original_description": ori_info[entity]["description"] if "description" in ori_info[entity] else None,
-                "llm_description": None
-            }
-        entity_embeddings[entity] = None
+            entity_embeddings[entity] = None
+        
     
     return entity_info, entity_embeddings
 
@@ -316,7 +331,7 @@ def labeling_hierarchy_to_entities(hierarchy, entity_info):
 
 def construct_args():
     parser = argparse.ArgumentParser(description='Cluster entities using hierarchical clustering and refine the clusters using LLM.')
-    parser.add_argument('--output_dir', type=str, default="/data/pj20/lamake_data")
+    parser.add_argument('--output_dir', type=str, default="/shared/pj20/lamake_data")
     parser.add_argument('--data_dir', type=str, default="/home/pj20/server-03/lamake/data")
     parser.add_argument('--dataset', type=str, default="FB15K-237", help='Path to the dataset file containing the list of entities to cluster.')
     parser.add_argument('--dimensions', type=int, default=1024, help='Dimensionality of the embeddings. Default: 1024.')

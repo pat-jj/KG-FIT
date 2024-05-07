@@ -1,1 +1,1 @@
-python cluster.py
+python cluster.py --dataset YAGO3-10
