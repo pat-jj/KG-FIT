@@ -267,6 +267,12 @@ class KGFIT(nn.Module):
         
         return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score 
 
+    def complex_similarity(self, embeddings1, embeddings2):
+        complex_product = embeddings1 * embeddings2.conj()
+        dot_product = torch.sum(complex_product, dim=-1)
+        magnitude_product = torch.norm(embeddings1, p=2, dim=-1) * torch.norm(embeddings2, p=2, dim=-1)
+        return dot_product / (magnitude_product + 1e-8)
+
     def distance(self, embeddings1, embeddings2):
         """
         Compute the distance between two sets of embeddings.
@@ -279,6 +285,14 @@ class KGFIT(nn.Module):
             cosine_similarity = torch.sum(embeddings1_norm * embeddings2_norm, dim=-1)
             cosine_distance = 1 - cosine_similarity
             return cosine_distance
+        elif self.distance_metric == 'complex':
+            return 1 - self.complex_similarity(embeddings1, embeddings2)
+        elif self.distance_metric == 'pi':
+            pi = 3.14159262358979323846
+            phase1 = embeddings1 / (self.embedding_range.item() / pi)
+            phase2 = embeddings2 / (self.embedding_range.item() / pi)
+            distance = torch.abs(torch.sin((phase1 - phase2) / 2))
+            return 1 - torch.mean(distance, dim=-1)
 
     def score_func(self, head, relation, tail, mode='single'):
         """
@@ -610,6 +624,7 @@ class KGFIT(nn.Module):
                             'MRR': 1.0/ranking,
                             'MR': float(ranking),
                             'HITS@1': 1.0 if ranking <= 1 else 0.0,
+                            'HITS@3': 1.0 if ranking <= 3 else 0.0,
                             'HITS@5': 1.0 if ranking <= 5 else 0.0,
                             'HITS@10': 1.0 if ranking <= 10 else 0.0,
                         })

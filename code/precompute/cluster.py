@@ -80,14 +80,19 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         ori_desc = original_descriptions[i] if original_descriptions else None
         entity_text = entities_text[i]
         
-        if entity_embeddings[entity] is None or entity_info[entity]["llm_description"] is None:
+        if entity_info[entity]["llm_description"] is None:
+            description = generate_entity_description(entity_text, hint=ori_desc)
+            entity_info[entity]["llm_description"] = description
+        else:
+            description = entity_info[entity]["llm_description"]
+        
+        if entity_embeddings[entity] is None:
             entity_embedding = client.embeddings.create(
                 input=entity_text,
                 model=model,
                 dimensions=dim,
             ).data[0].embedding
 
-            description = generate_entity_description(entity_text, hint=ori_desc)
             description_embedding = client.embeddings.create(
                 input=description,
                 model=model,
@@ -96,7 +101,6 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
 
             combined_embedding = np.concatenate((entity_embedding, description_embedding))
             
-            entity_info[entity]["llm_description"] = description
             entity_embeddings[entity] = combined_embedding.tolist()
             
         return entity_info[entity], entity_embeddings[entity]
@@ -108,7 +112,8 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
             embeddings.append(embedding)
             entity_info[entities[futures.index(future)]] = info
             
-            if futures.index(future) % 1000 == 0 or futures.index(future) == len(entities) - 1:
+            # if futures.index(future) % 10000 == 0 or futures.index(future) == len(entities) - 1:
+            if futures.index(future) == len(entities) - 1:
                 with open(f"{args.output_dir}/{args.dataset}/entity_info.json", 'w') as f:
                     json.dump(entity_info, f, indent=4)
                 

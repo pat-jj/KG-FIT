@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=5 python -u code/run_1.py \
+CUDA_VISIBLE_DEVICES=5 python -u code/run_2.py \
  --do_train \
  --cuda \
  --do_valid \
@@ -7,8 +7,8 @@ CUDA_VISIBLE_DEVICES=5 python -u code/run_1.py \
  --dataset FB15K-237 \
  --model TransE \
  --distance_metric cosine \
- --zeta_3 2.0 \
+ --zeta_3 1.8 \
  -n 256 -b 256 -d 2048 \
  -g 24.0 -a 1.0 -adv \
- -lr 0.0001 --max_steps 150000 \
+ -lr 0.0001 --max_steps 300000 \
  --test_batch_size 16 

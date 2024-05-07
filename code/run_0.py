@@ -3,7 +3,7 @@ import wandb
 
 from torch.utils.data   import DataLoader
 from utils              import *
-from model_1            import *
+from model_0            import *
 from dataloader         import TrainDataset
 from dataloader         import BidirectionalOneShotIterator
 
@@ -89,7 +89,8 @@ def log_metrics(mode, step, metrics):
 
 def main(args):
     wandb.init(project="kgfit", config=args)
-    loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss", "positive_sample_loss", "loss"])
+    loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss",
+                                      "text_dist_p", "self_cluster_dist_p", "neighbor_cluster_dist_p", "hier_dist_p", "positive_sample_loss", "loss"])
     
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
         raise ValueError('one of train/val/test mode must be choosed.')
@@ -258,6 +259,10 @@ def main(args):
                 log['neighbor_cluster_dist_n'],
                 log['hier_dist_n'],
                 log['negative_sample_loss'],
+                log['text_dist_p'],
+                log['self_cluster_dist_p'],
+                log['neighbor_cluster_dist_p'],
+                log['hier_dist_p'],
                 log['positive_sample_loss']
             )
         

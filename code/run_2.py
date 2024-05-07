@@ -3,7 +3,7 @@ import wandb
 
 from torch.utils.data   import DataLoader
 from utils              import *
-from model_0            import *
+from model_2            import *
 from dataloader         import TrainDataset
 from dataloader         import BidirectionalOneShotIterator
 
@@ -42,7 +42,7 @@ def construct_args():
 
     # Model hyperparameters
     parser.add_argument('--model', type=str, default='TransE', help='Knowledge graph embedding model')
-    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine'],help='Distance metric for link prediction')
+    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi'],help='Distance metric for link prediction')
     
     # Hyperparameters
     parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')
@@ -77,7 +77,7 @@ def construct_args():
     args = parser.parse_args()
     
     args.data_path = f'{args.data_path}/{args.dataset}'
-    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}'
+    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}_flex'
     
     return args
 
@@ -89,8 +89,7 @@ def log_metrics(mode, step, metrics):
 
 def main(args):
     wandb.init(project="kgfit", config=args)
-    loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss",
-                                      "text_dist_p", "self_cluster_dist_p", "neighbor_cluster_dist_p", "hier_dist_p", "positive_sample_loss", "loss"])
+    loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss", "positive_sample_loss", "loss"])
     
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
         raise ValueError('one of train/val/test mode must be choosed.')
@@ -181,6 +180,8 @@ def main(args):
     if args.cuda:
         kgfit_model = kgfit_model.cuda()
         
+    kgfit_model.entity_embedding_init()
+        
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(
@@ -259,10 +260,6 @@ def main(args):
                 log['neighbor_cluster_dist_n'],
                 log['hier_dist_n'],
                 log['negative_sample_loss'],
-                log['text_dist_p'],
-                log['self_cluster_dist_p'],
-                log['neighbor_cluster_dist_p'],
-                log['hier_dist_p'],
                 log['positive_sample_loss']
             )
         
