@@ -265,11 +265,6 @@ class KGFIT(nn.Module):
         
         return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score 
 
-    def complex_similarity(self, embeddings1, embeddings2):
-        complex_product = embeddings1 * embeddings2.conj()
-        dot_product = torch.sum(complex_product, dim=-1)
-        magnitude_product = torch.norm(embeddings1, p=2, dim=-1) * torch.norm(embeddings2, p=2, dim=-1)
-        return dot_product / (magnitude_product + 1e-8)
 
     def distance(self, embeddings1, embeddings2):
         """
@@ -285,8 +280,8 @@ class KGFIT(nn.Module):
             cosine_similarity = torch.sum(embeddings1_norm * embeddings2_norm, dim=-1)
             cosine_distance = 1 - cosine_similarity
             return cosine_distance
-        elif self.distance_metric == 'complex':
-            return 1 - self.complex_similarity(embeddings1, embeddings2)
+        elif self.distance_metric == 'rotate':
+            return self.rotate_distance(embeddings1, embeddings2, embeddings2)
         elif self.distance_metric == 'pi':
             pi = 3.14159262358979323846
             phase1 = embeddings1 / (self.embedding_range.item() / pi)

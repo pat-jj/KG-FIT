@@ -42,7 +42,7 @@ def construct_args():
 
     # Model hyperparameters
     parser.add_argument('--model', type=str, default='TransE', help='Knowledge graph embedding model')
-    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi'],help='Distance metric for link prediction')
+    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi', 'rotate'],help='Distance metric for link prediction')
     
     # Hyperparameters
     parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')

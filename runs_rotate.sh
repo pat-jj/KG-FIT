@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=2 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
@@ -6,8 +6,8 @@ CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
  --data_path data \
  --dataset FB15K-237 \
  --model RotatE \
- --distance_metric complex \
- --hierarchy_type seed \
+ --distance_metric cosine \
+ --hierarchy_type llm \
  --zeta_3 2.0 \
  -n 256 -b 256 -d 1024 \
  -g 24.0 -a 1.0 -adv \
