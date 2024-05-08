@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=2 python -u code/run_2.py \
  --model pRotatE \
  --distance_metric complex \
  --zeta_3 2.0 \
- -n 256 -b 256 -d 2048 \
+ -n 512 -b 256 -d 2048 \
  -g 24.0 -a 1.0 -adv \
  -lr 0.0001 --max_steps 300000 \
  --test_batch_size 16

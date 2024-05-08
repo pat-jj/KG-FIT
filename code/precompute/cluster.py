@@ -338,6 +338,7 @@ def construct_args():
     parser = argparse.ArgumentParser(description='Cluster entities using hierarchical clustering and refine the clusters using LLM.')
     parser.add_argument('--output_dir', type=str, default="/shared/pj20/lamake_data")
     parser.add_argument('--data_dir', type=str, default="/home/pj20/server-03/lamake/data")
+    parser.add_argument('--hier_type', type=str, default="seed", choices=['seed', 'llm'], help='Type of hierarchy to construct. Default: seed.')
     parser.add_argument('--dataset', type=str, default="FB15K-237", help='Path to the dataset file containing the list of entities to cluster.')
     parser.add_argument('--dimensions', type=int, default=1024, help='Dimensionality of the embeddings. Default: 1024.')
     parser.add_argument('--num_threads', type=int, default=10, help='Number of threads to use for multi-threaded processes. Default: 10.')
@@ -370,7 +371,7 @@ def main():
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json"):
         print("Start Finding Optimal Threshold...")
         # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.3, max_threshold=0.9, num_thresholds=20)
-        best_threshold = 0.52
+        best_threshold = 0.49
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
@@ -383,8 +384,8 @@ def main():
         with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'r') as f:
             seed_hierarchy = json.load(f)
             
-    seed_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(seed_hierarchy)
-    print("Done.")
+        seed_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(seed_hierarchy)
+        print("Done.")
 
     print("Start Computing Clusters Embeddings...")
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.json"):
@@ -421,6 +422,51 @@ def main():
         sorted_entity_embeddings = sort_entity_embeddings(entity_embeddings_dict=entity_embeddings, entity2id=entity2id)
         # save the sorted entity embeddings
         np.save(f"{args.output_dir}/{args.dataset}/entity_init_embeddings.npy", sorted_entity_embeddings)
+        
+    
+    if not os.path.exists(f"{args.output_dir}/{args.dataset}/llm_hierarchy.json"):
+        print('Please first use llm_refine.py to refine the seed hierarchy using LLM, and generate llm_hierarchy.json.')
+    else:
+        print(f"Loading existing llm clusters from {args.output_dir}/{args.dataset}/llm_hierarchy.json...")
+        with open(f"{args.output_dir}/{args.dataset}/llm_hierarchy.json", 'r') as f:
+            llm_hierarchy = json.load(f)
+            
+        llm_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(llm_hierarchy)
+        with open(f"{args.output_dir}/{args.dataset}/tmp/llm_hierarchy_int.json", 'w') as f:
+            json.dump(llm_hierarchy_int, f, indent=4)
+        with open(f"{args.output_dir}/{args.dataset}/tmp/key_map_inv.json", 'w') as f:
+            json.dump(key_map_inv, f, indent=4)
+        print("Done.")
+        
+        print("Start Computing Clusters Embeddings...")
+        if not os.path.exists(f"{args.output_dir}/{args.dataset}/clusters_embeddings_llm.json"):
+            label2entity = {entity_info[entity]['text_label']: entity for entity in entity_info.keys()}
+            clusters_embeddings = compute_clusters_embeddings(clusters=llm_hierarchy, entity_embeddings=entity_embeddings, label2entity=label2entity)
+            for cluster_id in clusters_embeddings:
+                clusters_embeddings[cluster_id] = clusters_embeddings[cluster_id].tolist()
+            with open(f"{args.output_dir}/{args.dataset}/clusters_embeddings_llm.json", 'w') as f:
+                json.dump(clusters_embeddings, f, indent=4)
+                
+            embs = []
+            for i in range(len(key_map_inv)):
+                if i in key_map_inv.keys():
+                    original_key = key_map_inv[i]
+                    emb = clusters_embeddings[original_key]
+                else:
+                    emb = np.zeros(len(embs[0]))
+                embs.append(emb)
+            embs = np.array(embs)
+            np.save(f"{args.output_dir}/{args.dataset}/clusters_embeddings_llm.npy", embs)
+        print("Done.")
+        
+        print("Start labeling hierarchy information to entities...")
+        if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json"):
+            entity_info_llm_hier = labeling_hierarchy_to_entities(llm_hierarchy_int, entity_info)
+            with open(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json", 'w') as f:
+                json.dump(entity_info_llm_hier, f, indent=4)
+                
+        print("Done.")
+        
         
     
     

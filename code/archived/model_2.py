@@ -11,13 +11,12 @@ from sklearn.metrics        import average_precision_score
 
 
 class KGFIT(nn.Module):
-    def __init__(self, base_model, nentity, nrelation, hidden_dim, gamma, 
-                    double_entity_embedding=False, double_relation_embedding=False,
-                    entity_text_embeddings=None, cluster_embeddings=None, 
-                    rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',
-                    ):
-        
+    def __init__(self, base_model, nentity, nrelation, hidden_dim, gamma,
+                 double_entity_embedding=False, double_relation_embedding=False,
+                 entity_text_embeddings=None, cluster_embeddings=None,
+                 rho=0.5, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5,
+                 zeta_1=0.3, zeta_2=0.2, zeta_3=1.0, distance_metric='cosine'):
+
         super(KGFIT, self).__init__()
         self.model_name = base_model
         self.nentity = nentity
@@ -25,50 +24,47 @@ class KGFIT(nn.Module):
         self.hidden_dim = hidden_dim
         self.epsilon = 2.0
         self.distance_metric = distance_metric
+
+        self.gamma = nn.Parameter(torch.Tensor([gamma]), requires_grad=False)
         
-        self.gamma = nn.Parameter(
-            torch.Tensor([gamma]), 
-            requires_grad=False
-        )
+        # Hyperparameters
+        self.rho = rho              # Hyperparameter controlling the influence of the randomly initialized component in the embedding
         
+        self.lambda_1 = lambda_1    # Hyperparameter controlling the influence of the inter-level cluster separation
+        self.lambda_2 = lambda_2    # Hyperparameter controlling the influence of the hierarchical distance maintenance
+        self.lambda_3 = lambda_3    # Hyperparameter controlling the influence of the cluster cohesion
+        
+        self.zeta_1 = zeta_1        # Hyperparameter controlling the influence of the entire hierarchical constraint
+        self.zeta_2 = zeta_2        # Hyperparameter controlling the influence of the text embedding deviation
+        self.zeta_3 = zeta_3        # Hyperparameter controlling the influence of the link prediction score
+
         self.embedding_range = nn.Parameter(
-            torch.Tensor([(self.gamma.item() + self.epsilon) / hidden_dim]), 
+            torch.Tensor([(self.gamma.item() + self.epsilon) / hidden_dim]),
             requires_grad=False
         )
-        
-        self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
-        self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
-        
-        # Initialize relation embeddings (Equation 7)
-        self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
-        nn.init.uniform_(
-            tensor=self.relation_embedding, 
-            a=-self.embedding_range.item(), 
-            b=self.embedding_range.item()
+
+        self.entity_dim = hidden_dim * 2 if double_entity_embedding else hidden_dim
+        self.relation_dim = hidden_dim * 2 if double_relation_embedding else hidden_dim
+
+        self.relation_embedding = nn.Parameter(
+            torch.empty(nrelation, self.relation_dim).uniform_(-self.embedding_range.item(), self.embedding_range.item())
         )
-        print(f"Size of random relation_embedding: {self.relation_embedding.size()}")
-        
-        # Initialize randomly initialized component of entity embeddings
-        self.entity_embedding_init = nn.Parameter(torch.zeros(nentity, self.entity_dim))
-        nn.init.uniform_(
-            tensor=self.entity_embedding_init, 
-            a=-self.embedding_range.item(), 
-            b=self.embedding_range.item()
+
+        self.entity_embedding_rand = nn.Parameter(
+            torch.empty(nentity, self.entity_dim).uniform_(-self.embedding_range.item(), self.embedding_range.item())
         )
-        print(f"Size of random entity_embedding_init: {self.entity_embedding_init.size()}")
-        
-        ent_text_emb, ent_desc_emb      = torch.chunk(entity_text_embeddings, 2, dim=1)
-        clus_text_emb, clus_desc_emb    = torch.chunk(cluster_embeddings, 2, dim=1)
-        
-        # concatenate ent_text_emb[:self.entity_dim/2] and ent_desc_emb[:self.entity_dim/2], size: (nentity, self.entity_dim)
-        self.entity_text_embeddings = torch.cat([ent_text_emb[:, :self.entity_dim//2], ent_desc_emb[:, :self.entity_dim//2]], dim=1)
-        self.entity_text_embeddings_fix = torch.cat([ent_text_emb[:, :self.entity_dim//2], ent_desc_emb[:, :self.entity_dim//2]], dim=1)
-        self.entity_text_embeddings_fix.requires_grad = False
-        print(f"Size of entity_text_embeddings: {self.entity_text_embeddings_fix.size()}")
-        # concatenate clus_text_emb[:self.entity_dim/2] and clus_desc_emb[:self.entity_dim/2], size: (nentity, self.entity_dim)
-        self.cluster_embeddings     = torch.cat([clus_text_emb[:, :self.entity_dim//2], clus_desc_emb[:, :self.entity_dim//2]], dim=1)
-        self.cluster_embeddings.requires_grad = False
-        print(f"Size of cluster_embeddings: {self.cluster_embeddings.size()}")
+
+        ent_text_emb, ent_desc_emb = torch.chunk(entity_text_embeddings, 2, dim=1)
+        clus_text_emb, clus_desc_emb = torch.chunk(cluster_embeddings, 2, dim=1)
+
+        with torch.no_grad():
+            self.entity_text_embeddings_fix = torch.cat(
+                [ent_text_emb[:, :self.entity_dim // 2], ent_desc_emb[:, :self.entity_dim // 2]], dim=1
+            )
+            self.cluster_embeddings = torch.cat(
+                [clus_text_emb[:, :self.entity_dim // 2], clus_desc_emb[:, :self.entity_dim // 2]], dim=1
+            )
+
         
         if base_model == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
@@ -82,18 +78,10 @@ class KGFIT(nn.Module):
 
         if base_model == 'ComplEx' and (not double_entity_embedding or not double_relation_embedding):
             raise ValueError('ComplEx should use --double_entity_embedding and --double_relation_embedding')
+    
+    def entity_embedding_init(self):
+        self.entity_embedding = self.rho * self.entity_embedding_rand + (1-self.rho) * self.entity_text_embeddings_fix
         
-        # Hyperparameters
-        self.rho = rho              # Hyperparameter controlling the influence of the randomly initialized component in the embedding
-        
-        self.lambda_1 = lambda_1    # Hyperparameter controlling the influence of the inter-level cluster separation
-        self.lambda_2 = lambda_2    # Hyperparameter controlling the influence of the hierarchical distance maintenance
-        self.lambda_3 = lambda_3    # Hyperparameter controlling the influence of the cluster cohesion
-        
-        self.zeta_1 = zeta_1        # Hyperparameter controlling the influence of the entire hierarchical constraint
-        self.zeta_2 = zeta_2        # Hyperparameter controlling the influence of the text embedding deviation
-        self.zeta_3 = zeta_3        # Hyperparameter controlling the influence of the link prediction score
-
     @staticmethod
     def get_masked_embeddings(indices, embeddings, dim_size):
         """
@@ -122,7 +110,7 @@ class KGFIT(nn.Module):
         Retrieve the embedding for the given entity ID.
         """
         # size: (nentity, self.entity_dim)
-        return self.rho * self.entity_embedding_init + (1 - self.rho) * self.entity_text_embeddings
+        return self.entity_embedding
     
 
     def forward(self, sample, self_cluster_ids, neighbor_clusters_ids, parent_ids, mode='single'):
@@ -130,21 +118,12 @@ class KGFIT(nn.Module):
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation = torch.index_select(self.relation_embedding, dim=0, index=sample[:, 1]).unsqueeze(1)
             # positive head embeddings,         size: (batch_size, 1, hidden_dim)
-            head_init = torch.index_select(self.entity_embedding_init, dim=0, index=sample[:, 0]).unsqueeze(1)
+            head = torch.index_select(self.entity_embedding, dim=0, index=sample[:, 0]).unsqueeze(1)
             # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
-            tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=sample[:, 2]).unsqueeze(1)
-            # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
-            head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 0]).unsqueeze(1)
-            # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
-            tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=sample[:, 2]).unsqueeze(1)
-            
-            
-            # Combine entity embeddings with text embeddings and randomly initialized component, size: (batch_size, 1, hidden_dim)
-            head_combined           =   self.rho * head_init + (1 - self.rho) * head_text
-            tail_combined           =   self.rho * tail_init + (1 - self.rho) * tail_text
+            tail = torch.index_select(self.entity_embedding, dim=0, index=sample[:, 2]).unsqueeze(1)
             
             # KGE Score (positive),               (lower -> better),     size: (batch_size, 1)
-            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
+            link_pred_score         =   self.score_func(head, relation, tail, mode)
             
             return link_pred_score
             
@@ -161,15 +140,13 @@ class KGFIT(nn.Module):
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=tail_part[:, 1]).unsqueeze(1)
             # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
-            tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part[:, 2]).unsqueeze(1)
+            tail = torch.index_select(self.entity_embedding, dim=0, index=tail_part[:, 2]).unsqueeze(1)
             # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
-            head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            head = torch.index_select(self.entity_embedding, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
-            tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part[:, 2]).unsqueeze(1)
+            tail_text = torch.index_select(self.entity_text_embeddings_fix, dim=0, index=tail_part[:, 2]).unsqueeze(1)
             # negative head text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
-            head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            # positive tail text embeddings,    size: (batch_size, 1, hidden_dim)
-            tail_text_fix = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part[:, 2]).unsqueeze(1)
+            head_text = torch.index_select(self.entity_text_embeddings_fix, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
             # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
@@ -183,28 +160,23 @@ class KGFIT(nn.Module):
                 (parent_ids.size(0), parent_ids.size(1), self.hidden_dim)
             )
             
-            # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
-            tail_combined           =   self.rho * tail_init + (1 - self.rho) * tail_text
-            # # negative head embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
-            head_combined           =   self.rho * head_init + (1 - self.rho) * head_text
-            
             # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
-            text_dist               =   self.distance(tail_combined, tail_text_fix)
+            text_dist               =   self.distance(tail, tail_text  )
 
             # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
-            self_cluster_dist       =   self.distance(tail_combined, cluster_emb)
+            self_cluster_dist       =   self.distance(tail, cluster_emb)
             
             # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
-            neighbor_cluster_dist   =   self.distance(tail_combined, neighbor_cluster_emb)
+            neighbor_cluster_dist   =   self.distance(tail, neighbor_cluster_emb)
             
             #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, max_parent_num)
             hier_dist = 0
             for i in range(len(parent_emb)-1):
                 parent_embedding, parent_parent_embedding = parent_emb[i], parent_emb[i+1]
-                hier_dist           +=  self.distance(tail_combined, parent_parent_embedding) - self.distance(tail_combined, parent_embedding)
+                hier_dist           +=  self.distance(tail, parent_parent_embedding) - self.distance(tail, parent_embedding)
                 
             # KGE Score (negative heads),       (lower -> better),      size: (batch_size, negative_sample_size)
-            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
+            link_pred_score         =   self.score_func(head, relation, tail, mode)
             
             
             
@@ -220,15 +192,13 @@ class KGFIT(nn.Module):
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=head_part[:, 1]).unsqueeze(1)
             # positive head embeddings,         size: (batch_size, 1, hidden_dim)
-            head_init = torch.index_select(self.entity_embedding_init, dim=0, index=head_part[:, 0]).unsqueeze(1)
+            head = torch.index_select(self.entity_embedding, dim=0, index=head_part[:, 0]).unsqueeze(1)
             # negative tail embeddings,         size: (batch_size, negative_sample_size, hidden_dim)
-            tail_init = torch.index_select(self.entity_embedding_init, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
+            tail = torch.index_select(self.entity_embedding, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
-            head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part[:, 0]).unsqueeze(1)
+            head_text = torch.index_select(self.entity_text_embeddings_fix, dim=0, index=head_part[:, 0]).unsqueeze(1)
             # negative tail text embeddings,    size: (batch_size, negative_sample_size, hidden_dim)
-            tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
-            # positive head text embeddings,    size: (batch_size, 1, hidden_dim)
-            head_text_fix = torch.index_select(self.entity_text_embeddings_fix, dim=0, index=head_part[:, 0]).unsqueeze(1)
+            tail_text = torch.index_select(self.entity_text_embeddings_fix, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive head cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
             # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
@@ -242,28 +212,24 @@ class KGFIT(nn.Module):
                 (parent_ids.size(0), parent_ids.size(1), self.hidden_dim)
             )
             
-            # positive head embeddings,        size: (batch_size, 1, hidden_dim)
-            head_combined = self.rho * head_init + (1 - self.rho) * head_text 
-            # negative tail embeddings,       size: (batch_size, negative_sample_size, hidden_dim)
-            tail_combined = self.rho * tail_init + (1 - self.rho) * tail_text 
             
             # Text Embedding Deviation,         (lower -> better),      size: (batch_size, 1)
-            text_dist               =   self.distance(head_combined, head_text_fix)
+            text_dist               =   self.distance(head, head_text  )
             
             # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
-            self_cluster_dist       =   self.distance(head_combined, cluster_emb)
+            self_cluster_dist       =   self.distance(head, cluster_emb)
             
             # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
-            neighbor_cluster_dist   =   self.distance(head_combined, neighbor_cluster_emb)
+            neighbor_cluster_dist   =   self.distance(head, neighbor_cluster_emb)
             
             #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, max_parent_num)
             hier_dist = 0
             for i in range(len(parent_emb)-1):
                 parent_embedding, parent_parent_embedding = parent_emb[i], parent_emb[i+1]
-                hier_dist           +=  self.distance(head_combined, parent_parent_embedding) - self.distance(head_combined, parent_embedding)
+                hier_dist           +=  self.distance(head, parent_parent_embedding) - self.distance(head, parent_embedding)
             
             # KGE Score (negative tails),       (lower -> better),      size: (batch_size, negative_sample_size)
-            link_pred_score         =   self.score_func(head_combined, relation, tail_combined, mode)
+            link_pred_score         =   self.score_func(head, relation, tail, mode)
             
         
         else:
@@ -489,8 +455,6 @@ class KGFIT(nn.Module):
             negative_sample_loss = - (subsampling_weight * negative_score).sum()/subsampling_weight.sum()
 
         ## Loss function
-        loss = (positive_sample_loss + negative_sample_loss)/2
-        
         if args.regularization != 0.0:
             #Use L3 regularization for ComplEx and DistMult
             regularization = args.regularization * (
@@ -501,15 +465,16 @@ class KGFIT(nn.Module):
             regularization_log = {'regularization': regularization.item()}
         else:
             regularization_log = {}
+                
             
-        loss = model.zeta_3 * loss \
+        loss = model.zeta_3 * (positive_sample_loss + negative_sample_loss)/2 \
             + model.zeta_1 * (model.lambda_1 * (self_cluster_dist_n) \
                                 - model.lambda_2 * (neighbor_cluster_dist_mean_n) \
                                 - model.lambda_3 * (hier_dist_mean_n)) \
             + model.zeta_2 * (text_dist_n)
         
         loss = loss.mean()        
-        loss.backward()
+        loss.backward(retain_graph=True)
 
         optimizer.step()
 

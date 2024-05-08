@@ -180,8 +180,6 @@ def main(args):
     if args.cuda:
         kgfit_model = kgfit_model.cuda()
         
-    kgfit_model.entity_embedding_init()
-        
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(

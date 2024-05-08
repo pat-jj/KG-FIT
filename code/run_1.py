@@ -88,7 +88,7 @@ def log_metrics(mode, step, metrics):
     print(f"{mode} step {step}: {metrics}")
 
 def main(args):
-    wandb.init(project="kgfit", config=args)
+    wandb.init(project="kgfit", config=args, name=f"{args.dataset}-{args.model}-{args.hierarchy_type}-{args.hidden_dim}")
     loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss", "positive_sample_loss", "loss"])
     
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
