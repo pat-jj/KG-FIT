@@ -5,11 +5,11 @@ CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
  --do_test \
  --data_path data \
  --dataset FB15K-237 \
- --model RotatE \
+ --model ComplEx \
  --distance_metric complex \
  --hierarchy_type seed \
  --zeta_3 2.0 \
  -n 256 -b 256 -d 1024 \
  -g 24.0 -a 1.0 -adv \
  -lr 0.0001 --max_steps 300000 \
- --test_batch_size 16 -de
+ --test_batch_size 16 -de -dr

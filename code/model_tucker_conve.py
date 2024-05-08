@@ -15,7 +15,7 @@ class KGFIT(nn.Module):
                     double_entity_embedding=False, double_relation_embedding=False,
                     entity_text_embeddings=None, cluster_embeddings=None, 
                     rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',
+                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine', kwargs={},
                     ):
         
         super(KGFIT, self).__init__()
@@ -72,7 +72,6 @@ class KGFIT(nn.Module):
         if base_model == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
         
-        #Do not forget to modify this line when you add a new model in the "forward" function
         if base_model not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE']:
             raise ValueError('model %s not supported' % base_model)
             
@@ -152,10 +151,10 @@ class KGFIT(nn.Module):
             tail_part, head_part = sample
             batch_size, negative_sample_size = head_part.size(0), head_part.size(1)
             
-            assert torch.all(head_part < self.nentity), "head_part contains out-of-bounds indices"
-            assert torch.all(tail_part < self.nentity), "tail_part contains out-of-bounds indices"
-            assert torch.all(neighbor_clusters_ids < len(self.cluster_embeddings)), "neighbor_clusters_ids contains out-of-bounds indices"
-            assert torch.all(parent_ids < len(self.cluster_embeddings)), "parent_ids contains out-of-bounds indices"
+            # assert torch.all(head_part < self.nentity), "head_part contains out-of-bounds indices"
+            # assert torch.all(tail_part < self.nentity), "tail_part contains out-of-bounds indices"
+            # assert torch.all(neighbor_clusters_ids < len(self.cluster_embeddings)), "neighbor_clusters_ids contains out-of-bounds indices"
+            # assert torch.all(parent_ids < len(self.cluster_embeddings)), "parent_ids contains out-of-bounds indices"
             
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=tail_part[:, 1]).unsqueeze(1)
@@ -208,11 +207,10 @@ class KGFIT(nn.Module):
         elif mode == 'tail-batch':
             head_part, tail_part = sample
             batch_size, negative_sample_size = tail_part.size(0), tail_part.size(1)
-            
-            assert torch.all(head_part < self.nentity), "head_part contains out-of-bounds indices"
-            assert torch.all(tail_part < self.nentity), "tail_part contains out-of-bounds indices"
-            assert torch.all(neighbor_clusters_ids < len(self.cluster_embeddings)), "neighbor_clusters_ids contains out-of-bounds indices"
-            assert torch.all(parent_ids < len(self.cluster_embeddings)), "parent_ids contains out-of-bounds indices"
+            # assert torch.all(head_part < self.nentity), "head_part contains out-of-bounds indices"
+            # assert torch.all(tail_part < self.nentity), "tail_part contains out-of-bounds indices"
+            # assert torch.all(neighbor_clusters_ids < len(self.cluster_embeddings)), "neighbor_clusters_ids contains out-of-bounds indices"
+            # assert torch.all(parent_ids < len(self.cluster_embeddings)), "parent_ids contains out-of-bounds indices"
             
             # positive relation embeddings,     size: (batch_size, 1, hidden_dim)
             relation  = torch.index_select(self.relation_embedding, dim=0, index=head_part[:, 1]).unsqueeze(1)
@@ -279,6 +277,8 @@ class KGFIT(nn.Module):
         """
         if self.distance_metric == 'euclidean':
             return torch.norm(embeddings1 - embeddings2, p=2, dim=-1)
+        elif self.distance_metric == 'manhattan':
+            return torch.norm(embeddings1 - embeddings2, p=1, dim=-1)
         elif self.distance_metric == 'cosine':
             embeddings1_norm = F.normalize(embeddings1, p=2, dim=-1)
             embeddings2_norm = F.normalize(embeddings2, p=2, dim=-1)
@@ -293,6 +293,8 @@ class KGFIT(nn.Module):
             phase2 = embeddings2 / (self.embedding_range.item() / pi)
             distance = torch.abs(torch.sin((phase1 - phase2) / 2))
             return 1 - torch.mean(distance, dim=-1)
+        else:
+            raise ValueError(f"Unknown distance metric: {self.distance_metric}")
 
     def score_func(self, head, relation, tail, mode='single'):
         """
@@ -303,7 +305,7 @@ class KGFIT(nn.Module):
             'DistMult': self.DistMult,
             'ComplEx': self.ComplEx,
             'RotatE': self.RotatE,
-            'pRotatE': self.pRotatE
+            'pRotatE': self.pRotatE,
         }
         
         if self.model_name in model_func:

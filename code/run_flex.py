@@ -3,7 +3,7 @@ import wandb
 
 from torch.utils.data   import DataLoader
 from utils              import *
-from model_2            import *
+from model_flex            import *
 from dataloader         import TrainDataset
 from dataloader         import BidirectionalOneShotIterator
 
