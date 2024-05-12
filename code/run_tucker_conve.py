@@ -11,6 +11,7 @@ from tqdm import tqdm
 from utils import read_entity_initial_embedding, read_cluster_embeddings, read_entity_info
 from dataloader import TrainDataset
 from torch.utils.data import DataLoader
+import wandb
     
 class Experiment:
 
@@ -96,6 +97,9 @@ class Experiment:
                 e1_idx = e1_idx.cuda()
                 r_idx = r_idx.cuda()
                 e2_idx = e2_idx.cuda()
+                self_cluster_ids = self_cluster_ids.cuda()
+                neighbor_clusters_ids = neighbor_clusters_ids.cuda()
+                parent_ids = parent_ids.cuda()
             predictions, text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist = model.forward(e1_idx, r_idx, self_cluster_ids, neighbor_clusters_ids, parent_ids)
 
             for j in range(data_batch.shape[0]):
@@ -124,10 +128,22 @@ class Experiment:
         print('Hits @1: {0}'.format(np.mean(hits[0])))
         print('Mean rank: {0}'.format(np.mean(ranks)))
         print('Mean reciprocal rank: {0}'.format(np.mean(1./np.array(ranks))))
+        
+        metrics = {
+            'hits@10': np.mean(hits[9]),
+            'hits@5': np.mean(hits[4]),
+            'hits@3': np.mean(hits[2]),
+            'hits@1': np.mean(hits[0]),
+            'mr': np.mean(ranks),
+            'mrr': np.mean(1./np.array(ranks))
+        }
+        
+        return metrics
+
 
 
     def train_and_eval(self, d, args):
-        
+        wandb.init(project="kgfit", config=args, name=f"{args.dataset}-{args.model}-{args.hierarchy_type}-{args.edim}")
         print("Training the {} model...".format(self.model))
         with open(os.path.join(args.data_dir, 'entities.dict')) as fin:
             self.entity_idxs = dict()
@@ -149,21 +165,23 @@ class Experiment:
         cluster_embeddings = read_cluster_embeddings(args)
         
 
-        if self.model == 'tucker':
+        if self.model == 'TuckER':
             model = KGFIT_TuckER(
                 d, self.ent_vec_dim, self.rel_vec_dim, 
                 nentity=len(d.entities), nrelation=len(d.relations),
                 entity_text_embeddings=entity_text_embeddings,
                 cluster_embeddings=cluster_embeddings,
+                distance_metric=args.distance_metric,
                 **self.kwargs)
-        elif self.model == 'conve':
+        elif self.model == 'ConvE':
             model = KGFIT_ConvE(d, self.ent_vec_dim, self.rel_vec_dim,
                 nentity=len(d.entities), nrelation=len(d.relations),
                 entity_text_embeddings=entity_text_embeddings,
-                cluster_embeddings=cluster_embeddings,
+                cluster_embeddings=cluster_embeddings, 
                 **self.kwargs)
         if self.cuda:
             model.cuda()
+            
         model.init()
         opt = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
         if self.decay_rate:
@@ -191,16 +209,24 @@ class Experiment:
                 if self.cuda:
                     e1_idx = e1_idx.cuda()
                     r_idx = r_idx.cuda()
+                    self_cluster_ids = self_cluster_ids.cuda()
+                    neighbor_clusters_ids = neighbor_clusters_ids.cuda()
+                    parent_ids = parent_ids.cuda()
                 predictions, text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist = model.forward(e1_idx, r_idx, self_cluster_ids, neighbor_clusters_ids, parent_ids)
                 if self.label_smoothing:
-                    targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))           
+                    targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))    
+                        
+                neighbor_cluster_dist_mean = neighbor_cluster_dist.mean(dim=1, keepdim=True)
+                hier_dist_mean = hier_dist.mean(dim=1, keepdim=True)
+                
                 loss = model.loss(predictions, targets)
                 loss = model.zeta_3 * loss \
                             + model.zeta_1 * (model.lambda_1 * (self_cluster_dist) \
-                                                - model.lambda_2 * (neighbor_cluster_dist) \
-                                                - model.lambda_3 * (hier_dist)) \
+                                                - model.lambda_2 * (neighbor_cluster_dist_mean) \
+                                                - model.lambda_3 * (hier_dist_mean)) \
                             + model.zeta_2 * (text_dist)
                 
+                loss = loss.mean()
                 
                 loss.backward()
                 opt.step()
@@ -208,14 +234,18 @@ class Experiment:
             if self.decay_rate:
                 scheduler.step()
             print('Epoch: {}, Time: {}s, Loss: {}'.format(it, time.time()-start_train, np.mean(losses)))
+            wandb.log({'train_loss': np.mean(losses)}, step=it)
             model.eval()
             with torch.no_grad():
                 if it % 50 == 0:
                     print("Test:")
-                    self.evaluate(model, d.test_data, out_lp_constraints=False)
+                    test_metrics = self.evaluate(model, d.test_data, out_lp_constraints=False)
+                    wandb.log({f"test_{k}": v for k, v in test_metrics.items()}, step=it)
                 if it == self.num_iterations - 1:
-                    self.evaluate(model, d.test_data, out_lp_constraints=True)
+                    test_metrics = self.evaluate(model, d.test_data, out_lp_constraints=True)
+                    wandb.log({f"test_{k}": v for k, v in test_metrics.items()}, step=it)
                     self.get_train_kge_neg(model, d.train_data)
+                    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -223,6 +253,7 @@ if __name__ == '__main__':
                     help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
     parser.add_argument('--process_path', type=str, default='/shared/pj20/lamake_data', help='Path to the entity hierarchy')
     parser.add_argument('--hierarchy_type', type=str, default='seed', choices=['seed', 'llm'],  help='Type of hierarchy to use')
+    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi', 'rotate'],help='Distance metric for link prediction')
     
     parser.add_argument("--num_iterations", type=int, default=500, nargs="?",
                     help="Number of iterations.")
@@ -246,7 +277,7 @@ if __name__ == '__main__':
                     help="Dropout after the second hidden layer.")
     parser.add_argument("--label_smoothing", type=float, default=0.1, nargs="?",
                     help="Amount of label smoothing.")
-    parser.add_argument("--model", type=str, default='tucker', nargs="?",
+    parser.add_argument("--model", type=str, default='TuckER', nargs="?",
                     help="Amount of label smoothing.")
     parser.add_argument("--gpu", type=int, default=2, nargs="?",
                 help="Relation embedding dimensionality.") 
@@ -254,7 +285,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     dataset = args.dataset
-    data_dir = "../data/%s/" % dataset
+    data_dir = "./data/%s/" % dataset
     args.data_dir = data_dir
     torch.backends.cudnn.deterministic = True 
     seed = 20

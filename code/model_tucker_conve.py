@@ -10,6 +10,8 @@ class KGFIT_TuckER(torch.nn.Module):
                  rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
                  zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',**kwargs):
         super(KGFIT_TuckER, self).__init__()
+        self.epsilon = 2.0
+        
         self.rho = rho
         self.lambda_1 = lambda_1
         self.lambda_2 = lambda_2
@@ -18,14 +20,9 @@ class KGFIT_TuckER(torch.nn.Module):
         self.zeta_2 = zeta_2
         self.zeta_3 = zeta_3
         
+        self.distance_metric = distance_metric
         
         self.entity_dim = d1
-        self.embedding_range = nn.Parameter(
-            torch.Tensor([(self.gamma.item() + self.epsilon) / self.entity_dim]), 
-            requires_grad=False
-        )
-
-        print(f"Size of random entity_embedding_init: {self.entity_embedding_init.size()}")
         
         ent_text_emb, ent_desc_emb      = torch.chunk(entity_text_embeddings, 2, dim=1)
         clus_text_emb, clus_desc_emb    = torch.chunk(cluster_embeddings, 2, dim=1)
@@ -40,8 +37,8 @@ class KGFIT_TuckER(torch.nn.Module):
         print(f"Size of cluster_embeddings: {self.cluster_embeddings.size()}")
         
         
-        self.E = torch.nn.Embedding(len(nentity), d1, padding_idx=0)
-        self.R = torch.nn.Embedding(len(nrelation), d2, padding_idx=0)
+        self.E = torch.nn.Embedding(nentity, d1, padding_idx=0)
+        self.R = torch.nn.Embedding(nrelation, d2, padding_idx=0)
         self.W = torch.nn.Parameter(torch.tensor(np.random.uniform(-1, 1, (d2, d1, d1)), 
                                     dtype=torch.float, device="cuda", requires_grad=True))
 
@@ -58,7 +55,7 @@ class KGFIT_TuckER(torch.nn.Module):
         xavier_normal_(self.E.weight.data)
         xavier_normal_(self.R.weight.data)
         
-        self.E = self.rho * self.E + self.entity_text_embeddings * (1 - self.rho)
+        self.E.weight.data = self.rho * self.E.weight.data + (1 - self.rho) * self.entity_text_embeddings
         
     @staticmethod
     def get_masked_embeddings(indices, embeddings, dim_size):
@@ -112,7 +109,7 @@ class KGFIT_TuckER(torch.nn.Module):
             raise ValueError(f"Unknown distance metric: {self.distance_metric}")
 
     def forward(self, e1_idx, r_idx, self_cluster_ids, neighbor_clusters_ids, parent_ids):
-        e1_text = torch.select(self.entity_text_embeddings, 0, e1_idx.view(-1)).unsqueeze(1)
+        e1_text = torch.index_select(self.entity_text_embeddings, 0, e1_idx.view(-1)).unsqueeze(1)
         cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
         # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
         neighbor_cluster_emb = self.get_masked_embeddings(

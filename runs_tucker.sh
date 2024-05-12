@@ -1,15 +1,6 @@
-CUDA_VISIBLE_DEVICES=4 python -u code/run_tucker_conve.py \
- --do_train \
- --cuda \
- --do_valid \
- --do_test \
- --data_path data \
+CUDA_VISIBLE_DEVICES=1 python -u code/run_tucker_conve.py \
  --dataset FB15K-237 \
  --model TuckER \
  --distance_metric cosine \
  --hierarchy_type seed \
- --zeta_3 2.0 \
- -n 1024 -b 256 -d 1024 \
- -g 24.0 -a 1.0 -adv \
- -lr 0.0001 --max_steps 400000 \
- --test_batch_size 16 
+ --edim 1024 --rdim 1024 \
