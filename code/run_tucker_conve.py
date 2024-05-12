@@ -130,12 +130,12 @@ class Experiment:
         print('Mean reciprocal rank: {0}'.format(np.mean(1./np.array(ranks))))
         
         metrics = {
-            'hits@10': np.mean(hits[9]),
-            'hits@5': np.mean(hits[4]),
-            'hits@3': np.mean(hits[2]),
-            'hits@1': np.mean(hits[0]),
-            'mr': np.mean(ranks),
-            'mrr': np.mean(1./np.array(ranks))
+            'Valid_HITS@10': np.mean(hits[9]),
+            'Valid_HITS@5': np.mean(hits[4]),
+            'Valid_HITS@3': np.mean(hits[2]),
+            'Valid_HITS@1': np.mean(hits[0]),
+            'MR': np.mean(ranks),
+            'MRR': np.mean(1./np.array(ranks))
         }
         
         return metrics
