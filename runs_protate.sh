@@ -1,15 +1,16 @@
-CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=2 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
  --do_test \
  --data_path data \
- --dataset FB15K-237 \
+ --dataset YAGO3-10 \
  --model pRotatE \
- --distance_metric complex \
- --hierarchy_type llm \
+ --distance_metric cosine \
+ --hierarchy_type seed \
  --zeta_3 2.0 \
- -n 512 -b 256 -d 2048 \
+ -n 256 -b 128 -d 1024 \
  -g 24.0 -a 1.0 -adv \
- -lr 0.0001 --max_steps 300000 \
- --test_batch_size 16
+ -lr 0.0001 --max_steps 1600000 \
+ --test_batch_size 8 \
+ -init /shared/pj20/lamake_data/YAGO3-10/checkpoints/pRotatE_seed_batch_128_hidden_1024_dist_cosine

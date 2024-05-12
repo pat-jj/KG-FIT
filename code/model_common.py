@@ -12,7 +12,7 @@ from sklearn.metrics        import average_precision_score
 
 class KGFIT(nn.Module):
     def __init__(self, base_model, nentity, nrelation, hidden_dim, gamma, 
-                    double_entity_embedding=False, double_relation_embedding=False,
+                    double_entity_embedding=False, double_relation_embedding=False, triple_relation_embedding=False,
                     entity_text_embeddings=None, cluster_embeddings=None, 
                     rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
                     zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine', kwargs={},
@@ -37,7 +37,12 @@ class KGFIT(nn.Module):
         )
         
         self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
-        self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
+        if double_relation_embedding:
+            self.relation_dim = hidden_dim*2
+        elif triple_relation_embedding:
+            self.relation_dim = hidden_dim*3
+        else:
+            self.relation_dim = hidden_dim
         
         # Initialize relation embeddings (Equation 7)
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
@@ -72,7 +77,7 @@ class KGFIT(nn.Module):
         if base_model == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
         
-        if base_model not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE']:
+        if base_model not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'HAKE']:
             raise ValueError('model %s not supported' % base_model)
             
         if base_model == 'RotatE' and (not double_entity_embedding or double_relation_embedding):
@@ -91,6 +96,11 @@ class KGFIT(nn.Module):
         self.zeta_1 = zeta_1        # Hyperparameter controlling the influence of the entire hierarchical constraint
         self.zeta_2 = zeta_2        # Hyperparameter controlling the influence of the text embedding deviation
         self.zeta_3 = zeta_3        # Hyperparameter controlling the influence of the link prediction score
+        
+        # model specific parameters
+        # HAKE
+        self.modulus_weight = 3.5
+        self.phase_weight = 1.0
 
     @staticmethod
     def get_masked_embeddings(indices, embeddings, dim_size):
@@ -301,6 +311,7 @@ class KGFIT(nn.Module):
             'ComplEx': self.ComplEx,
             'RotatE': self.RotatE,
             'pRotatE': self.pRotatE,
+            'HAKE': self.HAKE,
         }
         
         if self.model_name in model_func:
@@ -409,6 +420,37 @@ class KGFIT(nn.Module):
 
         score = self.gamma.item() - score.sum(dim = 2) * self.modulus
         return score
+    
+    def HAKE(self, head, rel, tail, mode):
+        """
+        Compute the score using the HAKE model.
+        """
+        pi = 3.14159262358979323846
+        
+        phase_head, mod_head = torch.chunk(head, 2, dim=2)
+        phase_relation, mod_relation, bias_relation = torch.chunk(rel, 3, dim=2)
+        phase_tail, mod_tail = torch.chunk(tail, 2, dim=2)
+
+        phase_head = phase_head / (self.embedding_range.item() / pi)
+        phase_relation = phase_relation / (self.embedding_range.item() / pi)
+        phase_tail = phase_tail / (self.embedding_range.item() / pi)
+
+        if mode == 'head-batch':
+            phase_score = phase_head + (phase_relation - phase_tail)
+        else:
+            phase_score = (phase_head + phase_relation) - phase_tail
+
+        mod_relation = torch.abs(mod_relation)
+        bias_relation = torch.clamp(bias_relation, max=1)
+        indicator = (bias_relation < -mod_relation)
+        bias_relation[indicator] = -mod_relation[indicator]
+
+        r_score = mod_head * (mod_relation + bias_relation) - mod_tail * (1 - bias_relation)
+
+        phase_score = torch.sum(torch.abs(torch.sin(phase_score / 2)), dim=2) * self.phase_weight
+        r_score = torch.norm(r_score, dim=2) * self.modulus_weight
+
+        return self.gamma.item() - (phase_score + r_score)
     
     
     @staticmethod

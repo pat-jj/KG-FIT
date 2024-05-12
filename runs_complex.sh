@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=0 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
@@ -7,9 +7,9 @@ CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
  --dataset FB15K-237 \
  --model ComplEx \
  --distance_metric euclidean \
- --hierarchy_type seed \
+ --hierarchy_type llm \
  --zeta_3 2.0 \
- -n 256 -b 256 -d 512 \
+ -n 256 -b 128 -d 512 \
  -g 24.0 -a 1.0 -adv \
  -lr 0.0001 --max_steps 300000 \
  --test_batch_size 16 -de -dr

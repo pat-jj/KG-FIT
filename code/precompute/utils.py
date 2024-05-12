@@ -1,5 +1,5 @@
 import numpy as np
-
+import itertools
 
 def find_leaves(d, leaf_keys=None, leaf_values=None):
     if leaf_keys is None:
@@ -74,6 +74,26 @@ def convert_numpy(obj):
     elif isinstance(obj, tuple):
         return tuple(convert_numpy(element) for element in obj)
     return obj
+
+
+
+def rename_unique_keys(d, prefix="Cluster"):
+    counter = itertools.count(1)  # Initialize the counter outside the function
+
+    def rename_recursively(d):
+        """Recursively renames all keys using a globally unique counter."""
+        new_dict = {}
+        for key, value in d.items():
+            new_key = f"{prefix}_{next(counter)}"  # Generate a globally unique key
+            if isinstance(value, dict):
+                # Recursively rename keys in sub-dictionaries
+                new_dict[new_key] = rename_recursively(value)
+            else:
+                # Apply new keys to values that are lists
+                new_dict[new_key] = value
+        return new_dict
+
+    return rename_recursively(d)  # Start the recursive renaming
 
 
 def label_(d, entity2clusterid, clusterid2count, leaf_keys=None, leaf_values=None):

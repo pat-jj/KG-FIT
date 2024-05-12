@@ -430,6 +430,8 @@ def main():
         print(f"Loading existing llm clusters from {args.output_dir}/{args.dataset}/llm_hierarchy.json...")
         with open(f"{args.output_dir}/{args.dataset}/llm_hierarchy.json", 'r') as f:
             llm_hierarchy = json.load(f)
+        
+        llm_hierarchy = rename_unique_keys(llm_hierarchy)
             
         llm_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(llm_hierarchy)
         with open(f"{args.output_dir}/{args.dataset}/tmp/llm_hierarchy_int.json", 'w') as f:
@@ -448,7 +450,7 @@ def main():
                 json.dump(clusters_embeddings, f, indent=4)
                 
             embs = []
-            for i in range(len(key_map_inv)+500):
+            for i in range(len(key_map_inv)):
                 if i in key_map_inv.keys():
                     original_key = key_map_inv[i]
                     emb = clusters_embeddings[original_key]
@@ -459,13 +461,13 @@ def main():
             np.save(f"{args.output_dir}/{args.dataset}/clusters_embeddings_llm.npy", embs)
         print("Done.")
         
-        # print("Start labeling hierarchy information to entities...")
-        # if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json"):
-        #     entity_info_llm_hier = labeling_hierarchy_to_entities(llm_hierarchy_int, entity_info)
-        #     with open(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json", 'w') as f:
-        #         json.dump(entity_info_llm_hier, f, indent=4)
+        print("Start labeling hierarchy information to entities...")
+        if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json"):
+            entity_info_llm_hier = labeling_hierarchy_to_entities(llm_hierarchy_int, entity_info)
+            with open(f"{args.output_dir}/{args.dataset}/entity_info_llm_hier.json", 'w') as f:
+                json.dump(entity_info_llm_hier, f, indent=4)
                 
-        # print("Done.")
+        print("Done.")
         
         
     
