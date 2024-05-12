@@ -7,7 +7,6 @@ from utils                  import *
 from dataloader             import *
 from tqdm                   import tqdm
 from torch.utils.data       import DataLoader
-from sklearn.metrics        import average_precision_score
 
 
 class KGFIT(nn.Module):
@@ -99,8 +98,8 @@ class KGFIT(nn.Module):
         
         # model specific parameters
         # HAKE
-        self.modulus_weight = 3.5
-        self.phase_weight = 1.0
+        self.phase_weight = nn.Parameter(torch.Tensor([[1.0 * self.embedding_range.item()]]))
+        self.modulus_weight = nn.Parameter(torch.Tensor([[3.5]]))
 
     @staticmethod
     def get_masked_embeddings(indices, embeddings, dim_size):

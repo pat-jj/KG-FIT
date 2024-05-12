@@ -4,12 +4,12 @@ CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
  --do_valid \
  --do_test \
  --data_path data \
- --dataset FB15K-237 \
+ --dataset YAGO3-10 \
  --model HAKE \
  --distance_metric cosine \
-  --hierarchy_type seed \
+ --hierarchy_type seed \
  --zeta_3 2.0 \
- -n 256 -b 128 -d 1024 \
+ -n 256 -b 128 -d 512 \
  -g 9.0 -a 1.0 -adv \
- -lr 0.0001 --max_steps 800000 \
+ -lr 0.00005 --max_steps 1200000 \
  --test_batch_size 8 -de -tr
