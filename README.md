@@ -1,5 +1,7 @@
 # Knowledge Graph Fine-Tuning with Open-World Entity Knowledge
 
+![alt text](/images/abstract.png "Optional title")
+
 ### Please use the scripts runs_xxx.sh to run the experiments for all the models. For example:
 ```bash
 bash runs_rotate.sh
