@@ -8,30 +8,9 @@ bash runs_tucker.sh
 
 ### We provide several variants of KG-FIT framework under the ```code``` folder:
 
-#### ```model_common.py```:
-- **KG-FIT with KGE base models:** all the models other than TuckER and ConvE. 
-
-- **Text and Hierarchical Constraints:** on negative batches.
-
-- **Text Embedding within Entity Embedding:** Frozen
-
-#### ```model_flex.py```:
-- **KG-FIT with KGE base models:** all the models other than TuckER and ConvE. 
-
-- **Text and Hierarchical Constraints:** on negative batches.
-
-- **Text Embedding within Entity Embedding:** On Fire
-
-#### ```model_p_anc.py```:
-- **KG-FIT with KGE base models:** all the models other than TuckER and ConvE. 
-
-- **Text and Hierarchical Constraints:** on both positive and negative batches.
-
-- **Text Embedding within Entity Embedding:** Frozen
-
-#### ```model_tucker_conve.py```:
-- **KG-FIT with KGE base models:** KG-FIT-TuckER and KG-FIT-ConvE. 
-
-- **Text and Hierarchical Constraints:** on both positive and negative batches.
-
-- **Text Embedding within Entity Embedding:** Frozen
+| File                      | KG-FIT with KGE base models                     | Text and Hierarchical Constraints   | Text Embedding within Entity Embedding |
+|---------------------------|--------------------------------------------------|-------------------------------------|----------------------------------------|
+| `model_common.py`         | All models except TuckER and ConvE              | On negative batches                 | Frozen                                 |
+| `model_flex.py`           | All models except TuckER and ConvE              | On negative batches                 | On Fire                                |
+| `model_p_anc.py`          | All models except TuckER and ConvE              | On both positive and negative batches | Frozen                               |
+| `model_tucker_conve.py`   | KG-FIT-TuckER and KG-FIT-ConvE                  | On both positive and negative batches | Frozen                               |
