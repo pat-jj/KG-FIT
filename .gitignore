@@ -109,3 +109,4 @@ venv.bak/
 wandb/
 plot/
 baselines/
+vis/

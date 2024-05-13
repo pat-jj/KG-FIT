@@ -8,7 +8,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 import argparse
 import os
 from tqdm import tqdm
-from utils import read_entity_initial_embedding, read_cluster_embeddings, read_entity_info
+from utils import read_entity_initial_embedding, read_cluster_embeddings, read_entity_info_dict
 from dataloader import TrainDataset
 from torch.utils.data import DataLoader
 import wandb
@@ -45,8 +45,11 @@ class Experiment:
         return er_vocab
     
     def get_entity_info_data(self, entity_info, entity_id):
-        cluster_id_head, neighbor_clusters_ids_head, \
-            parent_ids_head, _, _, _ = entity_info[entity_id]
+        try:
+            cluster_id_head, neighbor_clusters_ids_head, \
+                parent_ids_head = entity_info[entity_id]
+        except:
+            print(f"Error: {entity_id}")
         
         return cluster_id_head, neighbor_clusters_ids_head, parent_ids_head
     
@@ -82,7 +85,7 @@ class Experiment:
 
         print("Number of data points: %d" % len(test_data_idxs))
         
-        entity_info_test = read_entity_info(os.path.join(f'{args.process_path}/{args.dataset}',\
+        entity_info_test = read_entity_info_dict(os.path.join(f'{args.process_path}/{args.dataset}',\
             f'entity_info_{args.hierarchy_type}_hier.json'), test_data_idxs, self.idxs_entity)
         
         for i in range(0, len(test_data_idxs), self.batch_size):
@@ -188,7 +191,7 @@ class Experiment:
             scheduler = ExponentialLR(opt, self.decay_rate)
 
         train_data_idxs = self.get_data_idxs(d.train_data)
-        entity_info_train = read_entity_info(os.path.join(f'{args.process_path}/{args.dataset}',\
+        entity_info_train = read_entity_info_dict(os.path.join(f'{args.process_path}/{args.dataset}',\
             f'entity_info_{args.hierarchy_type}_hier.json'), train_data_idxs, self.idxs_entity)
         
         print("Number of training data points: %d" % len(train_data_idxs))
@@ -237,7 +240,7 @@ class Experiment:
             wandb.log({'train_loss': np.mean(losses)}, step=it)
             model.eval()
             with torch.no_grad():
-                if it % 50 == 0:
+                if it % 10 == 0:
                     print("Test:")
                     test_metrics = self.evaluate(model, d.test_data, out_lp_constraints=False)
                     wandb.log({f"test_{k}": v for k, v in test_metrics.items()}, step=it)

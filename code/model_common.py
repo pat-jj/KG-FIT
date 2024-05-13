@@ -274,6 +274,18 @@ class KGFIT(nn.Module):
         
         return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score 
 
+    def rotate_distance(self, embeddings1, embeddings2):
+        pi = 3.14159262358979323846
+        
+        phase1, mod1 = torch.chunk(embeddings1, 2, dim=-1)
+        phase2, mod2 = torch.chunk(embeddings2, 2, dim=-1)
+        
+        phase1 = phase1 / (self.embedding_range.item() / pi)
+        phase2 = phase2 / (self.embedding_range.item() / pi)
+        
+        phase_diff = torch.abs(torch.sin((phase1 - phase2) / 2))
+        # return torch.mean(phase_diff, dim=-1)
+        return torch.sum(phase_diff, dim=-1)
 
     def distance(self, embeddings1, embeddings2):
         """
@@ -290,7 +302,7 @@ class KGFIT(nn.Module):
             cosine_distance = 1 - cosine_similarity
             return cosine_distance
         elif self.distance_metric == 'rotate':
-            return self.rotate_distance(embeddings1, embeddings2, embeddings2)
+            return self.rotate_distance(embeddings1, embeddings2)
         elif self.distance_metric == 'pi':
             pi = 3.14159262358979323846
             phase1 = embeddings1 / (self.embedding_range.item() / pi)

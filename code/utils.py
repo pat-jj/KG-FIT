@@ -102,6 +102,34 @@ def read_entity_info(file_path, triples, id2entity):
         )
         
     return entity_info
+
+
+def read_entity_info_dict(file_path, triples, id2entity):
+    '''
+    Read entity information from the file.
+    '''
+    entity_info = {}
+    with open(file_path, 'r') as f:
+        info = json.load(f)
+        
+    for triple in tqdm(triples):
+        head = id2entity[triple[0]]
+        tail = id2entity[triple[2]]
+        cluster_id_head = info[head]['cluster']
+        neighbor_clusters_ids_head = info[head]['nearest_clusters_lca']
+        parent_ids_head = info[head]['parent_path']
+        cluster_id_tail = info[tail]['cluster']
+        neighbor_clusters_ids_tail = info[tail]['nearest_clusters_lca']
+        parent_ids_tail = info[tail]['parent_path']
+        
+        entity_info[triple[0]] = (
+            cluster_id_head, neighbor_clusters_ids_head, parent_ids_head
+        )
+        entity_info[triple[2]] = (
+            cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail
+        )
+        
+    return entity_info
         
 
 def set_logger(args):

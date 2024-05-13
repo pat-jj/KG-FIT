@@ -82,11 +82,13 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
         if entity_info[entity]["llm_description"] is None:
             description = generate_entity_description(entity_text, hint=ori_desc)
+            print(f"Entity {entity} - Description: {description}")
             entity_info[entity]["llm_description"] = description
         else:
             description = entity_info[entity]["llm_description"]
         
         if entity_embeddings[entity] is None:
+            print(f"Generating embeddings for entity {entity}...")
             entity_embedding = client.embeddings.create(
                 input=entity_text,
                 model=model,
@@ -305,7 +307,24 @@ def create_entity_info_emb_dict(args, entities):
                 "llm_description": None
             }
             entity_embeddings[entity] = None
-        
+            
+    elif args.dataset == "WN18RR":
+        entity_info = {}
+        entity_embeddings = {}
+        ori_info_path = f"{args.data_dir}/{args.dataset}/entity2text.txt"
+        with open(ori_info_path, 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            entity, text_info = line.strip().split("\t")
+            # print(entity, text_info)
+            text_label = text_info.split(", ")[0]
+            original_description = text_info.split(text_label + ", ")[1]
+            entity_info[entity] = {
+                "text_label": text_label,
+                "original_description": original_description,
+                "llm_description": None
+            }
+            entity_embeddings[entity] = None
     
     return entity_info, entity_embeddings
 

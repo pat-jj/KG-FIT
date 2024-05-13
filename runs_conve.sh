@@ -1,5 +1,5 @@
-CUDA_VISIBLE_DEVICES=0 python -u code/run_tucker_conve.py \
- --dataset FB15K-237 \
+CUDA_VISIBLE_DEVICES=1 python -u code/run_tucker_conve.py \
+ --dataset YAGO3-10 \
  --model ConvE \
  --distance_metric cosine \
  --hierarchy_type seed \
