@@ -31,4 +31,3 @@ bash runs_tucker.sh
 | `model_p_anc.py`          | All models except TuckER and ConvE              | On both positive and negative batches | Frozen                               |
 | `model_tucker_conve.py`   | KG-FIT-TuckER and KG-FIT-ConvE                  | On both positive and negative batches | Frozen                               |
 
-
