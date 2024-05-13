@@ -271,6 +271,7 @@ def read_entities(path):
         entities.append(entity)
     return entities
 
+
 def create_entity_info_emb_dict(args, entities):
     if args.dataset == "FB15K-237":
         ori_info_path = f"{args.data_dir}/{args.dataset}/entity2info.json"
@@ -333,6 +334,7 @@ def create_entity_info_emb_dict(args, entities):
     
     return entity_info, entity_embeddings
 
+
 def labeling_hierarchy_to_entities(hierarchy, entity_info):
     """
     Label the hierarchy information to entities.
@@ -356,7 +358,7 @@ def labeling_hierarchy_to_entities(hierarchy, entity_info):
                 entity_info[entity]['nearest_clusters_lca'] = nearest_clusters_lca
     
     return entity_info
-    
+
 
 def construct_args():
     parser = argparse.ArgumentParser(description='Cluster entities using hierarchical clustering and refine the clusters using LLM.')
