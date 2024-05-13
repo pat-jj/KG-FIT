@@ -6,7 +6,9 @@
 
 To enalbe precompute, you need to put a file named "openai_api.key" under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
 ```bash
+cd code/precompute
 python cluster.py --dataset FB15k-237 
+cd llm_refine
 python llm_refine.py
 ```
 

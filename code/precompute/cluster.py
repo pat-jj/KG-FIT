@@ -34,6 +34,7 @@ def gpt_chat_return_response(model, prompt, seed=44):
     )
     return response
 
+
 def generate_entity_description(entity, hint=None):
     if hint:
         prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\napple is a round fruit with red, green, or yellow skin and crisp, juicy flesh.\n\nHINT:{hint}\n\nNow, describe {entity}:"
@@ -82,13 +83,13 @@ def generate_embeddings(args, entity_info, entity_embeddings, dim=1024):
         
         if entity_info[entity]["llm_description"] is None:
             description = generate_entity_description(entity_text, hint=ori_desc)
-            print(f"Entity {entity} - Description: {description}")
+            # print(f"Entity {entity} - Description: {description}")
             entity_info[entity]["llm_description"] = description
         else:
             description = entity_info[entity]["llm_description"]
         
         if entity_embeddings[entity] is None:
-            print(f"Generating embeddings for entity {entity}...")
+            # print(f"Generating embeddings for entity {entity}...")
             entity_embedding = client.embeddings.create(
                 input=entity_text,
                 model=model,
@@ -213,6 +214,8 @@ def seed_hierarchy_construction(args, entities, embeddings, distance_threshold):
 
 def evaluate_threshold(args, entities, embeddings, threshold):
     clusters = agglomerative_clustering(args, entities, embeddings, threshold)
+    logging.info(f"Threshold {threshold:.2f} - Number of clusters: {len(clusters)}")
+    logging.info(f"Clusters: {clusters}")
     num_clusters = len(clusters)
     
     if num_clusters == 1:
@@ -223,6 +226,8 @@ def evaluate_threshold(args, entities, embeddings, threshold):
         return threshold, 0.0, None
     else:
         labels = np.zeros(len(entities), dtype=int)
+        if type(clusters) == tuple:
+            clusters = clusters[0]
         for i, cluster_entities in enumerate(clusters.values()):
             indices = [entities.index(entity) for entity in cluster_entities]
             labels[indices] = i
@@ -389,8 +394,10 @@ def main():
 
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json"):
         print("Start Finding Optimal Threshold...")
-        # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.3, max_threshold=0.9, num_thresholds=20)
-        best_threshold = 0.49
+        best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.84, max_threshold=0.99, num_thresholds=5) 
+        # best_threshold = 0.52  #FB15K-237
+        # best_threshold = 0.49  # YAGO3-10
+        # best_threshold = 0.84  # WN18RR
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
@@ -403,8 +410,8 @@ def main():
         with open(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json", 'r') as f:
             seed_hierarchy = json.load(f)
             
-        seed_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(seed_hierarchy)
-        print("Done.")
+    seed_hierarchy_int, _, key_map, key_map_inv = rename_clusters_to_ints(seed_hierarchy)
+    print("Done.")
 
     print("Start Computing Clusters Embeddings...")
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/clusters_embeddings_seed.json"):
