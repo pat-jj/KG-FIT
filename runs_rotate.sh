@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=7 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=3 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
@@ -7,9 +7,9 @@ CUDA_VISIBLE_DEVICES=7 python -u code/run.py \
  --dataset PrimeKG \
  --model RotatE \
  --distance_metric cosine \
- --hierarchy_type seed \
- --zeta_3 1.8 \
- -n 1024 -b 256 -d 512 \
+ --hierarchy_type llm \
+ --zeta_3 6.0 \
+ -n 1024 -b 256 -d 500 \
  -g 6.0 -a 0.5 -adv \
  -lr 0.00005 --max_steps 300000 \
  --test_batch_size 8 -de \

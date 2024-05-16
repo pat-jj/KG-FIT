@@ -7,16 +7,15 @@
 To enalbe precompute, you need to put a file named "openai_api.key" under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
 ```bash
 cd code/precompute
-python cluster.py --dataset FB15K-237 
+python cluster.py --dataset FB15K-237 # precomputation for seed hierarchy
 cd llm_refine
 python llm_refine.py
 cd ..
-python cluster.py --dataset FB15K-237
-python rerank_label.py --dataset FB15K-237 --hier seed
-python rerank_label.py --dataset FB15K-237 --hier llm
+python cluster.py --dataset FB15K-237 # precomputation for llm hierarchy
 ```
 
-where ```cluster.py``` is used to build seed hierarchy; ```llm_refine.py``` is used to refine the seed hierarchy with LLM; ```rerank_label.py``` is used to create the k-hop training set entities for each entity in the dataset, for graph-based re-ranking purpose.
+where ```cluster.py``` is used to build seed hierarchy; ```llm_refine.py``` is used to refine the seed hierarchy with LLM; 
+<!-- (```rerank_label.py``` is used to create the k-hop training set entities for each entity in the dataset, for graph-based re-ranking purpose. ) -->
 
 
 ## KG-FIT Training & Evaluation:
