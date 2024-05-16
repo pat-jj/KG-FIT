@@ -3,7 +3,7 @@ import wandb
 
 from torch.utils.data   import DataLoader
 from utils              import *
-from model_p            import *
+from model_p_anc            import *
 from dataloader         import TrainDataset
 from dataloader         import BidirectionalOneShotIterator
 
@@ -30,6 +30,7 @@ def construct_args():
     # Model settings
     parser.add_argument('-de', '--double_entity_embedding', action='store_true')
     parser.add_argument('-dr', '--double_relation_embedding', action='store_true')
+    parser.add_argument('-tr', '--triple_relation_embedding', action='store_true')
     
     parser.add_argument('-n', '--negative_sample_size', default=128, type=int)
     parser.add_argument('-d', '--hidden_dim', default=500, type=int)
@@ -38,20 +39,23 @@ def construct_args():
     parser.add_argument('-a', '--adversarial_temperature', default=1.0, type=float)
     parser.add_argument('-b', '--batch_size', default=1024, type=int)
     parser.add_argument('-r', '--regularization', default=0.0, type=float)
+    parser.add_argument('--hake_p', default=0.5, type=float, help='Hake p value')
+    parser.add_argument('--hake_m', default=0.5, type=float, help='Hake m value')
     parser.add_argument('--test_batch_size', default=4, type=int, help='valid/test batch size')
 
     # Model hyperparameters
     parser.add_argument('--model', type=str, default='TransE', help='Knowledge graph embedding model')
-    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi'],help='Distance metric for link prediction')
+    parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi', 'rotate'],help='Distance metric for link prediction')
     
     # Hyperparameters
-    parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')
-    parser.add_argument('--lambda_1', type=float, default=0.5, help='Weight for the inter-level cluster separation')
-    parser.add_argument('--lambda_2', type=float, default=0.5, help='Weight for the hierarchical distance maintenance')
+    parser.add_argument('--rho', type=float, default=0.6, help='Weight for the randomly initialized component')
+    parser.add_argument('--lambda_1', type=float, default=1.0, help='Weight for the inter-level cluster separation')
+    parser.add_argument('--lambda_2', type=float, default=0.4, help='Weight for the hierarchical distance maintenance')
     parser.add_argument('--lambda_3', type=float, default=0.5, help='Weight for the cluster cohesion')
     parser.add_argument('--zeta_1', type=float, default=0.5, help='Weight for the entire hierarchical constraint')
     parser.add_argument('--zeta_2', type=float, default=0.5, help='Weight for the text embedding deviation')
-    parser.add_argument('--zeta_3', type=float, default=0.5, help='Weight for the link prediction score')
+    parser.add_argument('--zeta_3', type=float, default=1.8, help='Weight for the link prediction score')
+    parser.add_argument('--inter_cluster_constraint', type=str, default="true", help='Use inter-cluster constraint')
     
     # Training settings
     parser.add_argument('--num_epochs', type=int, default=1000, help='Number of training epochs')
@@ -77,7 +81,7 @@ def construct_args():
     args = parser.parse_args()
     
     args.data_path = f'{args.data_path}/{args.dataset}'
-    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}'
+    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}_p'
     
     return args
 
@@ -88,7 +92,7 @@ def log_metrics(mode, step, metrics):
     print(f"{mode} step {step}: {metrics}")
 
 def main(args):
-    wandb.init(project="kgfit", config=args, name=f"{args.dataset}-{args.model}-{args.hierarchy_type}-{args.hidden_dim}-p")
+    wandb.init(project="kgfit", config=args, name=f"{args.dataset}-{args.model}-{args.hierarchy_type}-{args.hidden_dim}-p-{args.inter_cluster_constraint}")
     loss_table = wandb.Table(columns=["text_dist_n", "self_cluster_dist_n", "neighbor_cluster_dist_n", "hier_dist_n", "negative_sample_loss",
                                       "text_dist_p", "self_cluster_dist_p", "neighbor_cluster_dist_p", "hier_dist_p", "positive_sample_loss", "loss"])
     
@@ -159,6 +163,7 @@ def main(args):
         gamma=args.gamma,
         double_entity_embedding=args.double_entity_embedding,
         double_relation_embedding=args.double_relation_embedding,
+        triple_relation_embedding=args.triple_relation_embedding,
         entity_text_embeddings=entity_text_embeddings,
         cluster_embeddings=cluster_embeddings,
         rho=args.rho,
@@ -168,7 +173,10 @@ def main(args):
         zeta_1=args.zeta_1,
         zeta_2=args.zeta_2,
         zeta_3=args.zeta_3,
+        hake_m=args.hake_m,
+        hake_p=args.hake_p,
         distance_metric=args.distance_metric,
+        inter_cluster_constraint=args.inter_cluster_constraint,
     )
     wandb.watch(kgfit_model)
     ##########################

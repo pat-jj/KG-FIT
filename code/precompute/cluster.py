@@ -42,7 +42,8 @@ def generate_entity_description(entity, hint=None):
         # prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\napple is a round fruit with red, green, or yellow skin and crisp, juicy flesh.\n\nNow, describe {entity}:"
         prompt = f"Please provide a brief description of the entity '{entity}' in the following format:\n\n{entity} is a [description].\n\nFor example:\nBill Gates is a technology magnate, philanthropist, and co-founder of Microsoft Corporation, known for his significant contributions to the personal computing industry.\n\nNow, describe {entity}:"
 
-    response = gpt_chat_return_response(model="gpt-3.5-turbo-0125", prompt=prompt)
+    # response = gpt_chat_return_response(model="gpt-3.5-turbo-0125", prompt=prompt)
+    response = gpt_chat_return_response(model="gpt-4o-2024-05-13", prompt=prompt)
     description = response.choices[0].message.content.strip()
     return description
 
@@ -238,6 +239,7 @@ def evaluate_threshold(args, entities, embeddings, threshold):
 
 def find_optimal_threshold(args, entities, embeddings, min_threshold=0.1, max_threshold=1.0, num_thresholds=10):
     thresholds = np.linspace(min_threshold, max_threshold, num_thresholds)
+    # thresholds = [0.45, 0.49, 0.53, 0.56, 0.60, 0.63, 0.67, 0.70, 0.74, 0.77, 0.81, 0.84, 0.88]
     logging.info(f"Starting threshold evaluation with {num_thresholds} thresholds: {thresholds}")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_threads) as executor:
@@ -331,11 +333,22 @@ def create_entity_info_emb_dict(args, entities):
                 "llm_description": None
             }
             entity_embeddings[entity] = None
+            
+    elif args.dataset == "PrimeKG":
+        entity_info = {}
+        entity_embeddings = {}
+        for entity in entities:
+            entity_info[entity] = {
+                "text_label": entity,
+                "original_description": None,
+                "llm_description": None
+            }
+            entity_embeddings[entity] = None
     
     return entity_info, entity_embeddings
 
 
-def labeling_hierarchy_to_entities(hierarchy, entity_info):
+def labeling_hierarchy_to_entities(hierarchy, entity_info, num_threads=4):
     """
     Label the hierarchy information to entities.
     """
@@ -385,21 +398,22 @@ def main():
         
     entities = read_entities(f"{args.data_dir}/{args.dataset}/entities.dict")
     entity_info, entity_embeddings = create_entity_info_emb_dict(args, entities)
+        
+    print("Start Generating Embeddings...")
+    embeddings, entity_info, entity_embeddings = generate_embeddings(args, entity_info=entity_info, entity_embeddings=entity_embeddings, dim=args.dimensions)
     
     entities_text, original_descriptions = [], []
     for entity in entities:
         entities_text.append(entity_info[entity]["text_label"])
         original_descriptions.append(entity_info[entity]["original_description"])
-        
-    print("Start Generating Embeddings...")
-    embeddings, entity_info, entity_embeddings = generate_embeddings(args, entity_info=entity_info, entity_embeddings=entity_embeddings, dim=args.dimensions)
 
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json"):
         print("Start Finding Optimal Threshold...")
-        best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.84, max_threshold=0.99, num_thresholds=5) 
+        # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.20, max_threshold=0.70, num_thresholds=10) 
         # best_threshold = 0.52  #FB15K-237
         # best_threshold = 0.49  # YAGO3-10
-        # best_threshold = 0.84  # WN18RR
+        # best_threshold = 0.44  # WN18RR
+        best_threshold = 0.31  # PrimeKG
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")
@@ -435,7 +449,7 @@ def main():
     
     print("Start labeling hierarchy information to entities...")
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/entity_info_seed_hier.json"):
-        entity_info_seed_hier = labeling_hierarchy_to_entities(seed_hierarchy_int, entity_info)
+        entity_info_seed_hier = labeling_hierarchy_to_entities(seed_hierarchy_int, entity_info, num_threads=args.num_threads)
         with open(f"{args.output_dir}/{args.dataset}/entity_info_seed_hier.json", 'w') as f:
             json.dump(entity_info_seed_hier, f, indent=4)
     print("Done.")

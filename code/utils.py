@@ -95,10 +95,20 @@ def read_entity_info(file_path, triples, id2entity):
         cluster_id_tail = info[tail]['cluster']
         neighbor_clusters_ids_tail = info[tail]['nearest_clusters_lca']
         parent_ids_tail = info[tail]['parent_path']
+        #link graph neighbors
+        if 'k_hop_neighbors' in info[head]:
+            k_hop_neighbors_head = info[head]['k_hop_neighbors']
+        else:
+            k_hop_neighbors_head = []
+        if 'k_hop_neighbors' in info[tail]:
+            k_hop_neighbors_tail = info[tail]['k_hop_neighbors']
+        else:
+            k_hop_neighbors_tail = []
         
         entity_info.append(
             (cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, 
-             cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail)
+             cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail,
+             k_hop_neighbors_head, k_hop_neighbors_tail)
         )
         
     return entity_info

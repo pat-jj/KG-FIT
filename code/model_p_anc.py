@@ -12,10 +12,11 @@ from sklearn.metrics        import average_precision_score
 
 class KGFIT(nn.Module):
     def __init__(self, base_model, nentity, nrelation, hidden_dim, gamma, 
-                    double_entity_embedding=False, double_relation_embedding=False,
+                    double_entity_embedding=False, double_relation_embedding=False, triple_relation_embedding=False,
                     entity_text_embeddings=None, cluster_embeddings=None, 
-                    rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                    zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',
+                    rho=0.7, lambda_1=1.0, lambda_2=0.4, lambda_3=0.5, 
+                    zeta_1=0.2, zeta_2=0.3, zeta_3=0.5, distance_metric='cosine', 
+                    inter_cluster_constraint="true", hake_p=0.5, hake_m=0.5,kwargs={},
                     ):
         
         super(KGFIT, self).__init__()
@@ -25,6 +26,7 @@ class KGFIT(nn.Module):
         self.hidden_dim = hidden_dim
         self.epsilon = 2.0
         self.distance_metric = distance_metric
+        self.inter_cluster = inter_cluster_constraint
         
         self.gamma = nn.Parameter(
             torch.Tensor([gamma]), 
@@ -37,7 +39,12 @@ class KGFIT(nn.Module):
         )
         
         self.entity_dim = hidden_dim*2 if double_entity_embedding else hidden_dim
-        self.relation_dim = hidden_dim*2 if double_relation_embedding else hidden_dim
+        if double_relation_embedding:
+            self.relation_dim = hidden_dim*2
+        elif triple_relation_embedding:
+            self.relation_dim = hidden_dim*3
+        else:
+            self.relation_dim = hidden_dim
         
         # Initialize relation embeddings (Equation 7)
         self.relation_embedding = nn.Parameter(torch.zeros(nrelation, self.relation_dim))
@@ -72,8 +79,7 @@ class KGFIT(nn.Module):
         if base_model == 'pRotatE':
             self.modulus = nn.Parameter(torch.Tensor([[0.5 * self.embedding_range.item()]]))
         
-        #Do not forget to modify this line when you add a new model in the "forward" function
-        if base_model not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE']:
+        if base_model not in ['TransE', 'DistMult', 'ComplEx', 'RotatE', 'pRotatE', 'HAKE']:
             raise ValueError('model %s not supported' % base_model)
             
         if base_model == 'RotatE' and (not double_entity_embedding or double_relation_embedding):
@@ -92,6 +98,11 @@ class KGFIT(nn.Module):
         self.zeta_1 = zeta_1        # Hyperparameter controlling the influence of the entire hierarchical constraint
         self.zeta_2 = zeta_2        # Hyperparameter controlling the influence of the text embedding deviation
         self.zeta_3 = zeta_3        # Hyperparameter controlling the influence of the link prediction score
+        
+        # model specific parameters
+        # HAKE
+        self.phase_weight = nn.Parameter(torch.Tensor([[hake_p * self.embedding_range.item()]]))
+        self.modulus_weight = nn.Parameter(torch.Tensor([[hake_m]]))
 
     @staticmethod
     def get_masked_embeddings(indices, embeddings, dim_size):
@@ -145,25 +156,27 @@ class KGFIT(nn.Module):
             # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb_tail = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids_tail).unsqueeze(1)
             
-            # Example usage in the model's forward function
-            neighbor_clusters_emb_head = self.get_masked_embeddings(
-                neighbor_clusters_ids_head, self.cluster_embeddings,
-                (neighbor_clusters_ids_head.size(0), neighbor_clusters_ids_head.size(1), self.hidden_dim)
-            )
+            if self.inter_cluster == "true":
+                # Example usage in the model's forward function
+                neighbor_clusters_emb_head = self.get_masked_embeddings(
+                    neighbor_clusters_ids_head, self.cluster_embeddings,
+                    (neighbor_clusters_ids_head.size(0), neighbor_clusters_ids_head.size(1), self.entity_dim)
+                )
 
-            neighbor_clusters_emb_tail = self.get_masked_embeddings(
-                neighbor_clusters_ids_tail, self.cluster_embeddings,
-                (neighbor_clusters_ids_tail.size(0), neighbor_clusters_ids_tail.size(1), self.hidden_dim)
-            )
+                neighbor_clusters_emb_tail = self.get_masked_embeddings(
+                    neighbor_clusters_ids_tail, self.cluster_embeddings,
+                    (neighbor_clusters_ids_tail.size(0), neighbor_clusters_ids_tail.size(1), self.entity_dim)
+                )
+
 
             parent_emb_head = self.get_masked_embeddings(
                 parent_ids_head, self.cluster_embeddings,
-                (parent_ids_head.size(0), parent_ids_head.size(1), self.hidden_dim)
+                (parent_ids_head.size(0), parent_ids_head.size(1), self.entity_dim)
             )
 
             parent_emb_tail = self.get_masked_embeddings(
                 parent_ids_tail, self.cluster_embeddings,
-                (parent_ids_tail.size(0), parent_ids_tail.size(1), self.hidden_dim)
+                (parent_ids_tail.size(0), parent_ids_tail.size(1), self.entity_dim)
             )
             
             # Combine entity embeddings with text embeddings and randomly initialized component, size: (batch_size, 1, hidden_dim)
@@ -176,8 +189,11 @@ class KGFIT(nn.Module):
             # Cluster Cohesion,                 (lower -> better),     size: (batch_size, 1)
             self_cluster_dist       =   self.distance(head_combined, cluster_emb_head) + self.distance(tail_combined, cluster_emb_tail)
             
-            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
-            neighbor_cluster_dist   =   self.distance(head_combined, neighbor_clusters_emb_head) + self.distance(tail_combined, neighbor_clusters_emb_tail)
+            if self.inter_cluster == "true":
+                # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
+                neighbor_cluster_dist   =   self.distance(head_combined, neighbor_clusters_emb_head) + self.distance(tail_combined, neighbor_clusters_emb_tail)
+            else:
+                neighbor_cluster_dist   = torch.zeros((head_combined.size(0), 1), device=head_combined.device)
             
             #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, max_parent_num)
             hier_dist = 0
@@ -215,15 +231,16 @@ class KGFIT(nn.Module):
             head_text = torch.index_select(self.entity_text_embeddings, dim=0, index=head_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive tail cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
-            # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
-            neighbor_cluster_emb = self.get_masked_embeddings(
-                neighbor_clusters_ids, self.cluster_embeddings,
-                (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.hidden_dim)
-            )
+            if self.inter_cluster == "true":
+                # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
+                neighbor_cluster_emb = self.get_masked_embeddings(
+                    neighbor_clusters_ids, self.cluster_embeddings,
+                    (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.entity_dim)
+                )
             # positive parent embeddings, size: (batch_size, max_parent_num, hidden_dim)
             parent_emb = self.get_masked_embeddings(
                 parent_ids, self.cluster_embeddings,
-                (parent_ids.size(0), parent_ids.size(1), self.hidden_dim)
+                (parent_ids.size(0), parent_ids.size(1), self.entity_dim)
             )
             
             # positive tail embeddings,         size: (batch_size, 1, hidden_dim)
@@ -237,8 +254,11 @@ class KGFIT(nn.Module):
             # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
             self_cluster_dist       =   self.distance(tail_combined, cluster_emb)
             
-            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
-            neighbor_cluster_dist   =   self.distance(tail_combined, neighbor_cluster_emb)
+            if self.inter_cluster == "true":
+                # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
+                neighbor_cluster_dist   =   self.distance(tail_combined, neighbor_cluster_emb)
+            else:
+                neighbor_cluster_dist   = torch.zeros((tail_combined.size(0), 1), device=tail_combined.device)
             
             #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, max_parent_num)
             hier_dist = 0
@@ -272,15 +292,16 @@ class KGFIT(nn.Module):
             tail_text = torch.index_select(self.entity_text_embeddings, dim=0, index=tail_part.view(-1)).view(batch_size, negative_sample_size, -1)
             # positive head cluster embeddings, size: (batch_size, 1, hidden_dim)
             cluster_emb = torch.index_select(self.cluster_embeddings, dim=0, index=self_cluster_ids).unsqueeze(1)
-            # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
-            neighbor_cluster_emb = self.get_masked_embeddings(
-                neighbor_clusters_ids, self.cluster_embeddings,
-                (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.hidden_dim)
-            )
+            if self.inter_cluster == "true":
+                # positive other cluster embeddings, size: (batch_size, max_num_neighbor_clusters, hidden_dim)
+                neighbor_cluster_emb = self.get_masked_embeddings(
+                    neighbor_clusters_ids, self.cluster_embeddings,
+                    (neighbor_clusters_ids.size(0), neighbor_clusters_ids.size(1), self.entity_dim)
+                )
             # positive parent embeddings, size: (batch_size, max_parent_num, hidden_dim)
             parent_emb = self.get_masked_embeddings(
                 parent_ids, self.cluster_embeddings,
-                (parent_ids.size(0), parent_ids.size(1), self.hidden_dim)
+                (parent_ids.size(0), parent_ids.size(1), self.entity_dim)
             )
             
             # positive head embeddings,        size: (batch_size, 1, hidden_dim)
@@ -294,8 +315,11 @@ class KGFIT(nn.Module):
             # Cluster Cohesion,                 (lower -> better),      size: (batch_size, 1)
             self_cluster_dist       =   self.distance(head_combined, cluster_emb)
             
-            # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
-            neighbor_cluster_dist   =   self.distance(head_combined, neighbor_cluster_emb)
+            if self.inter_cluster == "true":
+                # Inter-level Cluster Separation,   (higher -> better),     size: (batch_size, neibor_cluster_size)
+                neighbor_cluster_dist   =   self.distance(head_combined, neighbor_cluster_emb)
+            else:
+                neighbor_cluster_dist   = torch.zeros((head_combined.size(0), 1), device=head_combined.device)
             
             #Hierarchical Distance Maintenance, (higher -> better),     size: (batch_size, max_parent_num)
             hier_dist = 0
@@ -314,11 +338,18 @@ class KGFIT(nn.Module):
         return text_dist, self_cluster_dist, neighbor_cluster_dist, hier_dist, link_pred_score 
     
 
-    def complex_similarity(self, embeddings1, embeddings2):
-        complex_product = embeddings1 * embeddings2.conj()
-        dot_product = torch.sum(complex_product, dim=-1)
-        magnitude_product = torch.norm(embeddings1, p=2, dim=-1) * torch.norm(embeddings2, p=2, dim=-1)
-        return dot_product / (magnitude_product + 1e-8)
+    def rotate_distance(self, embeddings1, embeddings2):
+        pi = 3.14159262358979323846
+        
+        phase1, mod1 = torch.chunk(embeddings1, 2, dim=-1)
+        phase2, mod2 = torch.chunk(embeddings2, 2, dim=-1)
+        
+        phase1 = phase1 / (self.embedding_range.item() / pi)
+        phase2 = phase2 / (self.embedding_range.item() / pi)
+        
+        phase_diff = torch.abs(torch.sin((phase1 - phase2) / 2))
+        # return torch.mean(phase_diff, dim=-1)
+        return torch.sum(phase_diff, dim=-1)
 
     def distance(self, embeddings1, embeddings2):
         """
@@ -326,20 +357,25 @@ class KGFIT(nn.Module):
         """
         if self.distance_metric == 'euclidean':
             return torch.norm(embeddings1 - embeddings2, p=2, dim=-1)
+        elif self.distance_metric == 'manhattan':
+            return torch.norm(embeddings1 - embeddings2, p=1, dim=-1)
         elif self.distance_metric == 'cosine':
             embeddings1_norm = F.normalize(embeddings1, p=2, dim=-1)
             embeddings2_norm = F.normalize(embeddings2, p=2, dim=-1)
             cosine_similarity = torch.sum(embeddings1_norm * embeddings2_norm, dim=-1)
             cosine_distance = 1 - cosine_similarity
             return cosine_distance
-        elif self.distance_metric == 'complex':
-            return 1 - self.complex_similarity(embeddings1, embeddings2)
+        elif self.distance_metric == 'rotate':
+            return self.rotate_distance(embeddings1, embeddings2)
         elif self.distance_metric == 'pi':
             pi = 3.14159262358979323846
             phase1 = embeddings1 / (self.embedding_range.item() / pi)
             phase2 = embeddings2 / (self.embedding_range.item() / pi)
             distance = torch.abs(torch.sin((phase1 - phase2) / 2))
             return 1 - torch.mean(distance, dim=-1)
+        else:
+            raise ValueError(f"Unknown distance metric: {self.distance_metric}")
+        
 
     def score_func(self, head, relation, tail, mode='single'):
         """
@@ -350,7 +386,8 @@ class KGFIT(nn.Module):
             'DistMult': self.DistMult,
             'ComplEx': self.ComplEx,
             'RotatE': self.RotatE,
-            'pRotatE': self.pRotatE
+            'pRotatE': self.pRotatE,
+            'HAKE': self.HAKE,
         }
         
         if self.model_name in model_func:
@@ -459,6 +496,37 @@ class KGFIT(nn.Module):
 
         score = self.gamma.item() - score.sum(dim = 2) * self.modulus
         return score
+    
+    def HAKE(self, head, rel, tail, mode):
+        """
+        Compute the score using the HAKE model.
+        """
+        pi = 3.14159262358979323846
+        
+        phase_head, mod_head = torch.chunk(head, 2, dim=2)
+        phase_relation, mod_relation, bias_relation = torch.chunk(rel, 3, dim=2)
+        phase_tail, mod_tail = torch.chunk(tail, 2, dim=2)
+
+        phase_head = phase_head / (self.embedding_range.item() / pi)
+        phase_relation = phase_relation / (self.embedding_range.item() / pi)
+        phase_tail = phase_tail / (self.embedding_range.item() / pi)
+
+        if mode == 'head-batch':
+            phase_score = phase_head + (phase_relation - phase_tail)
+        else:
+            phase_score = (phase_head + phase_relation) - phase_tail
+
+        mod_relation = torch.abs(mod_relation)
+        bias_relation = torch.clamp(bias_relation, max=1)
+        indicator = (bias_relation < -mod_relation)
+        bias_relation[indicator] = -mod_relation[indicator]
+
+        r_score = mod_head * (mod_relation + bias_relation) - mod_tail * (1 - bias_relation)
+
+        phase_score = torch.sum(torch.abs(torch.sin(phase_score / 2)), dim=2) * self.phase_weight
+        r_score = torch.norm(r_score, dim=2) * self.modulus_weight
+
+        return self.gamma.item() - (phase_score + r_score)
     
     
     @staticmethod

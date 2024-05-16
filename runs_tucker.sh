@@ -1,6 +1,6 @@
-CUDA_VISIBLE_DEVICES=0 python -u code/run_tucker_conve.py \
- --dataset FB15K-237 \
+CUDA_VISIBLE_DEVICES=7 python -u code/run_tucker_conve.py \
+ --dataset WN18RR \
  --model TuckER \
  --distance_metric cosine \
  --hierarchy_type seed \
- --edim 1024 --rdim 1024 \
+ --edim 512 --rdim 512 \

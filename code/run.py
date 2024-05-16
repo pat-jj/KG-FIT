@@ -39,6 +39,8 @@ def construct_args():
     parser.add_argument('-a', '--adversarial_temperature', default=1.0, type=float)
     parser.add_argument('-b', '--batch_size', default=1024, type=int)
     parser.add_argument('-r', '--regularization', default=0.0, type=float)
+    parser.add_argument('--hake_p', default=0.5, type=float, help='Hake p value')
+    parser.add_argument('--hake_m', default=0.5, type=float, help='Hake m value')
     parser.add_argument('--test_batch_size', default=4, type=int, help='valid/test batch size')
 
     # Model hyperparameters
@@ -46,13 +48,16 @@ def construct_args():
     parser.add_argument('--distance_metric', type=str, default='cosine', choices=['euclidean', 'cosine', 'complex', 'pi', 'rotate'],help='Distance metric for link prediction')
     
     # Hyperparameters
-    parser.add_argument('--rho', type=float, default=0.5, help='Weight for the randomly initialized component')
-    parser.add_argument('--lambda_1', type=float, default=0.5, help='Weight for the inter-level cluster separation')
-    parser.add_argument('--lambda_2', type=float, default=0.5, help='Weight for the hierarchical distance maintenance')
+    parser.add_argument('--rho', type=float, default=0.6, help='Weight for the randomly initialized component')
+    parser.add_argument('--lambda_1', type=float, default=1.0, help='Weight for the inter-level cluster separation')
+    parser.add_argument('--lambda_2', type=float, default=0.4, help='Weight for the hierarchical distance maintenance')
     parser.add_argument('--lambda_3', type=float, default=0.5, help='Weight for the cluster cohesion')
     parser.add_argument('--zeta_1', type=float, default=0.5, help='Weight for the entire hierarchical constraint')
     parser.add_argument('--zeta_2', type=float, default=0.5, help='Weight for the text embedding deviation')
-    parser.add_argument('--zeta_3', type=float, default=0.5, help='Weight for the link prediction score')
+    parser.add_argument('--zeta_3', type=float, default=1.8, help='Weight for the link prediction score')
+    parser.add_argument('--inter_cluster_constraint', type=str, default="true", help='Use inter-cluster constraint')
+    parser.add_argument('--rerank', type=str, default="false", help='Use reranking')
+    parser.add_argument('--fuse_score', type=str, default="false", help='Use fused score')
     
     # Training settings
     parser.add_argument('--num_epochs', type=int, default=1000, help='Number of training epochs')
@@ -169,7 +174,11 @@ def main(args):
         zeta_1=args.zeta_1,
         zeta_2=args.zeta_2,
         zeta_3=args.zeta_3,
+        hake_m=args.hake_m,
+        hake_p=args.hake_p,
         distance_metric=args.distance_metric,
+        inter_cluster_constraint=args.inter_cluster_constraint,
+        fuse_score=args.fuse_score,
     )
     wandb.watch(kgfit_model)
     ##########################
@@ -218,11 +227,11 @@ def main(args):
         logging.info('Loading checkpoint %s...' % args.init_checkpoint)
         checkpoint = torch.load(os.path.join(args.init_checkpoint, 'checkpoint'))
         init_step = checkpoint['step']
-        kgfit_model.load_state_dict(checkpoint['model_state_dict'])
+        kgfit_model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         if args.do_train:
             current_learning_rate = checkpoint['current_learning_rate']
             warm_up_steps = checkpoint['warm_up_steps']
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'], strict=False)
             
     else:
         logging.info('Ramdomly Initializing %s Base Model...' % args.model)

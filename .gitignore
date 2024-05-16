@@ -110,3 +110,5 @@ wandb/
 plot/
 baselines/
 vis/
+*.ipynb
+*.json

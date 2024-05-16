@@ -33,7 +33,7 @@ class TrainDataset(ABC):
         entity_info = self.entity_info[idx]
 
         head, relation, tail = positive_sample
-        cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail = entity_info
+        cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail, _, _ = entity_info
 
         subsampling_weight = self.count[(head, relation)] + self.count[(tail, -relation-1)]
         subsampling_weight = torch.sqrt(1 / torch.Tensor([subsampling_weight]))
@@ -152,7 +152,7 @@ class TrainDataset(ABC):
 
     
 class TestDataset(Dataset):
-    def __init__(self, triples, all_true_triples, nentity, nrelation, entity_info, mode):
+    def __init__(self, triples, all_true_triples, nentity, nrelation, entity_info, mode, rerank=False, alpha=0.5):
         self.len = len(triples)
         self.triple_set = set(all_true_triples)
         self.triples = triples
@@ -160,27 +160,41 @@ class TestDataset(Dataset):
         self.nrelation = nrelation
         self.mode = mode
         self.entity_info = entity_info
+        self.rerank = rerank
+        self.alpha = alpha
 
     def __len__(self):
         return self.len
     
     def __getitem__(self, idx):
         head, relation, tail = self.triples[idx]
-        cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail = self.entity_info[idx]
+        cluster_id_head, neighbor_clusters_ids_head, parent_ids_head, cluster_id_tail, neighbor_clusters_ids_tail, parent_ids_tail,\
+            k_hop_neighbors_head, k_hop_neighbors_tail = self.entity_info[idx]
 
         if self.mode == 'head-batch':
             tmp = [(0, rand_head) if (rand_head, relation, tail) not in self.triple_set
                 else (-1, head) for rand_head in range(self.nentity)]
             tmp[head] = (0, head)
+            tmp[tail] = (-1, tail)
         elif self.mode == 'tail-batch':
             tmp = [(0, rand_tail) if (head, relation, rand_tail) not in self.triple_set
                 else (-1, tail) for rand_tail in range(self.nentity)]
             tmp[tail] = (0, tail)
+            tmp[head] = (-1, head)
         else:
             raise ValueError('negative batch mode %s not supported' % self.mode)
             
         tmp = torch.LongTensor(tmp)            
         filter_bias = tmp[:, 0].float()
+        
+        if self.rerank:
+            if self.mode == 'tail-batch':
+                k_hop_neighbors_head = torch.LongTensor(k_hop_neighbors_head)
+                filter_bias[k_hop_neighbors_head] += self.alpha
+            elif self.mode == 'head-batch':
+                k_hop_neighbors_tail = torch.LongTensor(k_hop_neighbors_tail)
+                filter_bias[k_hop_neighbors_tail] += self.alpha
+
         negative_sample = tmp[:, 1]
 
         positive_sample = torch.LongTensor((head, relation, tail))

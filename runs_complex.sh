@@ -1,15 +1,15 @@
-CUDA_VISIBLE_DEVICES=0 python -u code/run.py \
+CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
  --do_train \
  --cuda \
  --do_valid \
  --do_test \
  --data_path data \
- --dataset FB15K-237 \
+ --dataset PrimeKG \
  --model ComplEx \
- --distance_metric euclidean \
- --hierarchy_type llm \
- --zeta_3 2.0 \
- -n 256 -b 128 -d 512 \
- -g 24.0 -a 1.0 -adv \
- -lr 0.0001 --max_steps 300000 \
- --test_batch_size 16 -de -dr
+ --distance_metric cosine \
+ --hierarchy_type seed \
+ --zeta_3 1.8 \
+ -n 1024 -b 512 -d 512 \
+ -g 200.0 -a 1.0 -adv \
+ -lr 0.002 --max_steps 300000 -r 0.000005 \
+ --test_batch_size 8 -de -dr

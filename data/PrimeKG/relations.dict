@@ -1,0 +1,11 @@
+0	disease_phenotype_positive
+1	drug_effect
+2	indication
+3	contraindication
+4	disease_disease
+5	disease_protein
+6	disease_phenotype_negative
+7	exposure_disease
+8	drug_protein
+9	off-label use
+10	drug_drug
