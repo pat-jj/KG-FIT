@@ -1,6 +1,6 @@
 # Knowledge Graph Fine-Tuning with Open-World Entity Knowledge
 
-![alt text](/images/abstract.png "Optional title")
+![alt text](/images/abstract.png "Overview of KG-FIT")
 
 ## Data Preparing & Precompute:
 
@@ -9,12 +9,12 @@ To enalbe precompute, you need to put a file named "openai_api.key" under ```cod
 cd code/precompute
 python cluster.py --dataset FB15K-237 # precomputation for seed hierarchy
 cd llm_refine
-python llm_refine.py
+python llm_refine.py                  # LLM-Guided Hierarchy Refinement (LHR)
 cd ..
 python cluster.py --dataset FB15K-237 # precomputation for llm hierarchy
 ```
 
-where ```cluster.py``` is used to build seed hierarchy; ```llm_refine.py``` is used to refine the seed hierarchy with LLM; 
+where the first call of ```cluster.py``` is used to build seed hierarchy; ```llm_refine.py``` is used to refine the seed hierarchy with LLM; The second call of ```cluster.py``` is used to build the final hierarchy with LLM.
 <!-- (```rerank_label.py``` is used to create the k-hop training set entities for each entity in the dataset, for graph-based re-ranking purpose. ) -->
 
 

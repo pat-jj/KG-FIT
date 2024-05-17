@@ -219,8 +219,8 @@ class Experiment:
                 if self.label_smoothing:
                     targets = ((1.0-self.label_smoothing)*targets) + (1.0/targets.size(1))    
                         
-                neighbor_cluster_dist_mean = neighbor_cluster_dist.mean(dim=1, keepdim=True)
-                hier_dist_mean = hier_dist.mean(dim=1, keepdim=True)
+                neighbor_cluster_dist_mean = neighbor_cluster_dist.mean(dim=-1, keepdim=True)
+                hier_dist_mean = hier_dist.mean(dim=-1, keepdim=True)
                 
                 loss = model.loss(predictions, targets)
                 loss = model.zeta_3 * loss \

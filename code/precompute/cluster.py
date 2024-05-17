@@ -409,11 +409,11 @@ def main():
 
     if not os.path.exists(f"{args.output_dir}/{args.dataset}/seed_hierarchy.json"):
         print("Start Finding Optimal Threshold...")
-        # best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.20, max_threshold=0.70, num_thresholds=10) 
+        best_threshold, best_clusters = find_optimal_threshold(args, entities_text, embeddings, min_threshold=0.05, max_threshold=0.70, num_thresholds=43) 
         # best_threshold = 0.52  #FB15K-237
         # best_threshold = 0.49  # YAGO3-10
         # best_threshold = 0.44  # WN18RR
-        best_threshold = 0.31  # PrimeKG
+        # best_threshold = 0.31  # PrimeKG
 
         print(f"Best Threshold: {best_threshold:.2f}")
         print("Start Creating Seed Clusters ...")

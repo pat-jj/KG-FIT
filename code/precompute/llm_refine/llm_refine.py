@@ -97,7 +97,7 @@ Output: '''
 # LLM Utilities
 ####################
 
-with open('./openai_api.key', 'r') as f:
+with open('../openai_api.key', 'r') as f:
     api_key = f.read().strip()
 
 client = OpenAI(api_key=api_key)
@@ -442,8 +442,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    with open(f'./data/seed_hierarchy_{args.dataset}.json') as f:
+    with open(f'/shared/pj20/lamake_data/{args.dataset}/seed_hierarchy.json') as f:
         initial_hierarchy = json.load(f)
     refined_hierarchy = llm_refine_hierarchical_knowledge(initial_hierarchy, args.dataset, args.model, args.seed)
-    with open(f'./outputs/{args.dataset}/llm_refined_hier_{args.model}_{str(args.seed)}.json', 'w') as f:
+    with open(f'/shared/pj20/lamake_data/{args.dataset}/llm_hierarchy.json', 'w') as f:
         json.dump(refined_hierarchy, f)

@@ -155,7 +155,7 @@ class KGFIT_ConvE(torch.nn.Module):
     def __init__(self, d, d1, d2, nentity, nrelation,
                  entity_text_embeddings=None, cluster_embeddings=None,
                  rho=0.4, lambda_1=0.5, lambda_2=0.5, lambda_3=0.5, 
-                 zeta_1=0.3, zeta_2=0.2, zeta_3=0.5, distance_metric='cosine',**kwargs):
+                 zeta_1=0.3, zeta_2=0.2, zeta_3=3.0, distance_metric='cosine',**kwargs):
         super(KGFIT_ConvE, self).__init__()
         
         self.epsilon = 2.0
