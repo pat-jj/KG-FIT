@@ -91,13 +91,19 @@ def main():
     entity_to_index = read_entity_mapping(entity_mapping_file)
     print(f"Reading knowledge graph from train set {kg_file_train} ...")
     graph = read_knowledge_graph(kg_file_train)
-    graph = read_knowledge_graph(kg_file_valid, graph)
+    # graph = read_knowledge_graph(kg_file_valid, graph)
     
     print(f"Reading test entities from {kg_file_valid} ...")
     test_entities = read_entities(kg_file_valid)
     
     print(f"Finding {k}-hop neighbors for test entities ...")
     k_hop_neighbors = find_k_hop_neighbors(graph, entity_to_index, test_entities, k)
+    
+    # compute the average number of neighbors
+    num_neighbors = 0
+    for entity_id in k_hop_neighbors:
+        num_neighbors += len(k_hop_neighbors[entity_id])
+    print(f"Average number of neighbors: {num_neighbors / len(k_hop_neighbors)}")
     
     with open(original_entity_info_file, 'r') as f:
         entity_info = json.load(f)

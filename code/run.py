@@ -1,5 +1,6 @@
 import argparse
 import wandb
+import time
 
 from torch.utils.data   import DataLoader
 from utils              import *
@@ -56,6 +57,9 @@ def construct_args():
     parser.add_argument('--zeta_2', type=float, default=0.5, help='Weight for the text embedding deviation')
     parser.add_argument('--zeta_3', type=float, default=1.8, help='Weight for the link prediction score')
     parser.add_argument('--inter_cluster_constraint', type=str, default="true", help='Use inter-cluster constraint')
+    parser.add_argument('--intra_cluster_constraint', type=str, default="true", help='Use intra-cluster constraint')
+    parser.add_argument('--hier_dist_constraint', type=str, default="true", help='Use hierarchical distance constraint')
+    parser.add_argument('--text_dist_constraint', type=str, default="true", help='Use text distance constraint')
     parser.add_argument('--rerank', type=str, default="false", help='Use reranking')
     parser.add_argument('--fuse_score', type=str, default="false", help='Use fused score')
     
@@ -83,7 +87,7 @@ def construct_args():
     args = parser.parse_args()
     
     args.data_path = f'{args.data_path}/{args.dataset}'
-    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}'
+    args.save_path = f'{args.process_path}/{args.dataset}/checkpoints/{args.model}_{args.hierarchy_type}_batch_{args.batch_size}_hidden_{args.hidden_dim}_dist_{args.distance_metric}_{time.strftime("%Y%m%d%H%M%S")}'
     
     return args
 
@@ -178,7 +182,9 @@ def main(args):
         hake_p=args.hake_p,
         distance_metric=args.distance_metric,
         inter_cluster_constraint=args.inter_cluster_constraint,
-        fuse_score=args.fuse_score,
+        intra_cluster_constraint=args.intra_cluster_constraint,
+        hier_dist_constraint=args.hier_dist_constraint,
+        text_dist_constraint=args.text_dist_constraint,
     )
     wandb.watch(kgfit_model)
     ##########################
@@ -231,7 +237,7 @@ def main(args):
         if args.do_train:
             current_learning_rate = checkpoint['current_learning_rate']
             warm_up_steps = checkpoint['warm_up_steps']
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'], strict=False)
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             
     else:
         logging.info('Ramdomly Initializing %s Base Model...' % args.model)

@@ -9,10 +9,14 @@ CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
  --distance_metric cosine \
  --hierarchy_type llm \
  --zeta_3 6.0 \
- -n 256 -b 256 -d 1024 \
- -g 24.0 -a 1.0 -adv \
- -lr 0.0002 --max_steps 300000 \
+ -n 512 -b 512 -d 1024 \
+ -g 10.0 -a 1.0 -adv \
+ -lr 0.00001 --max_steps 400000 \
  --test_batch_size 8 -de \
+ --text_dist_constraint true \
+ --hier_dist_constraint false \
+ --intra_cluster_constraint true \
+ --inter_cluster_constraint true \
 
 # CUDA_VISIBLE_DEVICES=4 python -u code/run_p_anc.py \
 #  --do_train \
@@ -31,7 +35,7 @@ CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
 #  --test_batch_size 8 -de \
 #  --inter_cluster_constraint false 
 
-#  CUDA_VISIBLE_DEVICES=6 python -u code/run.py \
+#  CUDA_VISIBLE_DEVICES=2 python -u code/run.py \
 #  --do_train \
 #  --cuda \
 #  --do_valid \
@@ -41,11 +45,15 @@ CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
 #  --model RotatE \
 #  --distance_metric cosine \
 #  --hierarchy_type llm \
-#  --zeta_3 2.0 \
-#  -n 256 -b 256 -d 1024 \
+#  --zeta_3 12.0 \
+#  -n 256 -b 256 -d 512 \
 #  -g 24.0 -a 1.0 -adv \
-#  -lr 0.0001 --max_steps 400000 \
-#  --test_batch_size 8 -de
+#  -lr 0.00001 --max_steps 400000 \
+#  --test_batch_size 8 -de \
+#  --text_dist_constraint true \
+#  --hier_dist_constraint false \
+#  --intra_cluster_constraint true \
+#  --inter_cluster_constraint true \
 
 
 #  CUDA_VISIBLE_DEVICES=6 python -u code/run.py \
@@ -58,8 +66,13 @@ CUDA_VISIBLE_DEVICES=5 python -u code/run.py \
 #  --model RotatE \
 #  --distance_metric cosine \
 #  --hierarchy_type llm \
-#  --zeta_3 2.0 \
+#  --zeta_3 3.5 \
 #  -n 256 -b 256 -d 1024 \
 #  -g 24.0 -a 1.0 -adv \
-#  -lr 0.0001 --max_steps 400000 \
-#  --test_batch_size 8 -de
+#  -lr 0.0001 --max_steps 800000 \
+#  --test_batch_size 8 -de \
+#  --text_dist_constraint true \
+#  --hier_dist_constraint false \
+#  --intra_cluster_constraint true \
+#  --inter_cluster_constraint true \
+#  --valid_steps 20000 \

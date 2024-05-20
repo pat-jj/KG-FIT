@@ -97,7 +97,7 @@ Output: '''
 # LLM Utilities
 ####################
 
-with open('../openai_api.key', 'r') as f:
+with open('./openai_api.key', 'r') as f:
     api_key = f.read().strip()
 
 client = OpenAI(api_key=api_key)
@@ -246,7 +246,7 @@ def construct_bot_hierarchy(initial_hierarchy, model, seed):
             splitted_clusters = llm_split_cluster(cluster_name, cluster_entities, model, seed)
             if len(splitted_clusters) == 1:
                 return
-
+            
             for name, entities in splitted_clusters.items():
                 current_full_cluster_id = 'Cluster_llm_bot_' + str(current_cluster_id)
                 root = {}
@@ -300,33 +300,12 @@ def construct_top_hierarchy(initial_hierarchy, model, seed):
 
         while True:
             update_mode, name = llm_update_two_clusters(left_node_value['name'], left_node_children, right_node_value['name'], right_node_children, model, seed)
-            # left cluster covers right cluster
-            if update_mode == 1:
-                left_node_value['children'][right_node_key] = right_node_value
-                updated_hierarchy = {
-                    'name': left_node_value['name'],
-                    'children': left_node_value['children']
-                }
-                print('Update mode 1')
-            # right cluster covers left cluster
-            elif update_mode == 2:
-                right_node_value['children'][left_node_key] = left_node_value
-                updated_hierarchy = {
-                    'name': right_node_value['name'],
-                    'children': right_node_value['children']
-                }
-                print('Update mode 2')
-            # merge left and right cluster to one cluster
-            elif update_mode == 3:
-                merged_cluster_name = name
-                merged_node_value = {**left_node_value['children'], **right_node_value['children']}
-                updated_hierarchy = {
-                    'name': merged_cluster_name,
-                    'children': merged_node_value
-                }
-                print('Update mode 3')
+            # print()
+            # print(left_node_value['name'], left_node_children)
+            # print(right_node_value['name'], right_node_children)
+
             # cannot cover or merge, create a new cluster
-            elif update_mode == 4: 
+            if update_mode == 1: 
                 new_cluster_name = name
                 updated_hierarchy = {
                     'name': new_cluster_name,
@@ -334,6 +313,31 @@ def construct_top_hierarchy(initial_hierarchy, model, seed):
                         left_node_key: left_node_value,
                         right_node_key: right_node_value
                     }
+                }
+                print('Update mode 1')
+            # merge left and right cluster to one cluster
+            elif update_mode == 2:
+                merged_cluster_name = name
+                merged_node_value = {**left_node_value['children'], **right_node_value['children']}
+                updated_hierarchy = {
+                    'name': merged_cluster_name,
+                    'children': merged_node_value
+                }
+                print('Update mode 2')
+            # left cluster covers right cluster
+            elif update_mode == 3:
+                left_node_value['children'][right_node_key] = right_node_value
+                updated_hierarchy = {
+                    'name': left_node_value['name'],
+                    'children': left_node_value['children']
+                }
+                print('Update mode 3')
+            # right cluster covers left cluster
+            elif update_mode == 4:
+                right_node_value['children'][left_node_key] = left_node_value
+                updated_hierarchy = {
+                    'name': right_node_value['name'],
+                    'children': right_node_value['children']
                 }
                 print('Update mode 4')
             else:
@@ -442,8 +446,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    with open(f'/shared/pj20/lamake_data/{args.dataset}/seed_hierarchy.json') as f:
+    with open(f'./data/seed_hierarchy_{args.dataset}.json') as f:
         initial_hierarchy = json.load(f)
     refined_hierarchy = llm_refine_hierarchical_knowledge(initial_hierarchy, args.dataset, args.model, args.seed)
-    with open(f'/shared/pj20/lamake_data/{args.dataset}/llm_hierarchy.json', 'w') as f:
+
+    # with open(f'/data/langcao2/kgft/wn_4o/llm_refined_hier_{args.model}_{str(args.seed)}.json', 'w') as f:
+    with open(f'./outputs/{args.dataset}/llm_refined_hier_{args.dataset}_{args.model}_{str(args.seed)}.json', 'w') as f:
         json.dump(refined_hierarchy, f)
