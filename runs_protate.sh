@@ -21,25 +21,25 @@
 #  --valid_steps 20000
 
 
- CUDA_VISIBLE_DEVICES=7 python -u code/run.py \
- --do_train \
- --cuda \
- --do_valid \
- --do_test \
- --data_path data \
- --dataset PrimeKG \
- --model pRotatE \
- --distance_metric cosine \
- --hierarchy_type llm \
- --zeta_3 7.0 \
- -n 512 -b 512 -d 2048 \
- -g 10.0 -a 1.0 -adv \
- -lr 0.00001 --max_steps 400000 \
- --test_batch_size 8 \
- --text_dist_constraint true \
- --hier_dist_constraint false \
- --intra_cluster_constraint true \
- --inter_cluster_constraint true \
+#  CUDA_VISIBLE_DEVICES=7 python -u code/run.py \
+#  --do_train \
+#  --cuda \
+#  --do_valid \
+#  --do_test \
+#  --data_path data \
+#  --dataset PrimeKG \
+#  --model pRotatE \
+#  --distance_metric cosine \
+#  --hierarchy_type llm \
+#  --zeta_3 7.0 \
+#  -n 512 -b 512 -d 2048 \
+#  -g 10.0 -a 1.0 -adv \
+#  -lr 0.00001 --max_steps 400000 \
+#  --test_batch_size 8 \
+#  --text_dist_constraint true \
+#  --hier_dist_constraint false \
+#  --intra_cluster_constraint true \
+#  --inter_cluster_constraint true \
 
 #  CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
 #  --do_train \
@@ -74,7 +74,7 @@
 #  --test_batch_size 8
 
 
-#  CUDA_VISIBLE_DEVICES=2 python -u code/run.py \
+#  CUDA_VISIBLE_DEVICES=3 python -u code/run.py \
 #  --do_train \
 #  --cuda \
 #  --do_valid \
@@ -84,9 +84,9 @@
 #  --model pRotatE \
 #  --distance_metric cosine \
 #  --hierarchy_type llm \
-#  --zeta_3 12.0 \
-#  -n 256 -b 256 -d 1024 \
-#  -g 24.0 -a 1.0 -adv \
+#  --zeta_3 8.0 \
+#  -n 512 -b 512 -d 2048 \
+#  -g 10.0 -a 1.0 -adv \
 #  -lr 0.00005 --max_steps 1600000 \
 #  --test_batch_size 8 \
 #  --text_dist_constraint true \
@@ -96,7 +96,7 @@
 #  -init /shared/pj20/lamake_data/YAGO3-10/checkpoints/pRotatE_seed_batch_128_hidden_1024_dist_cosine
 
 
-#  CUDA_VISIBLE_DEVICES=4 python -u code/run.py \
+#  CUDA_VISIBLE_DEVICES=3 python -u code/run.py \
 #  --do_train \
 #  --cuda \
 #  --do_valid \
@@ -106,10 +106,10 @@
 #  --model pRotatE \
 #  --distance_metric cosine \
 #  --hierarchy_type llm \
-#  --zeta_3 4.0 \
-#  -n 256 -b 256 -d 2048 \
-#  -g 24.0 -a 1.0 -adv \
-#  -lr 0.00005 --max_steps 800000 \
+#  --zeta_3 7.0 \
+#  -n 512 -b 512 -d 2048 \
+#  -g 9.0 -a 1.0 -adv \
+#  -lr 0.00005 --max_steps 1600000 \
 #  --test_batch_size 8 \
 #  --text_dist_constraint true \
 #  --hier_dist_constraint false \

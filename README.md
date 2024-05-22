@@ -4,14 +4,14 @@
 
 ## Data Preparing & Precompute:
 
-To enalbe precompute, you need to put a file named "openai_api.key" under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
+To enalbe precompute, you need to put a file named "openai_api.key" (with your OpenAI API key in there) under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
 ```bash
 cd code/precompute
-python cluster.py --dataset FB15K-237 # precomputation for seed hierarchy
+python cluster.py --dataset FB15K-237 --output_dir ../../processed_data  # precomputation for seed hierarchy
 cd llm_refine
-python llm_refine.py                  # LLM-Guided Hierarchy Refinement (LHR)
+python llm_refine.py --dataset FB15K-237  --model gpt-4o-2024-05-13 # LLM-Guided Hierarchy Refinement (LHR)
 cd ..
-python cluster.py --dataset FB15K-237 # precomputation for llm hierarchy
+python cluster.py --dataset FB15K-237  --output_dir ../../processed_data # precomputation for llm hierarchy
 ```
 
 where the first call of ```cluster.py``` is used to build seed hierarchy; ```llm_refine.py``` is used to refine the seed hierarchy with LLM; The second call of ```cluster.py``` is used to build the final hierarchy with LLM.
@@ -20,14 +20,14 @@ where the first call of ```cluster.py``` is used to build seed hierarchy; ```llm
 
 ## KG-FIT Training & Evaluation:
 
-### Please use the scripts runs_xxx.sh to run the experiments for all the models. For example:
+### Use the scripts runs_xxx.sh to run the experiments for all the models. For example:
 
 ```bash
 bash runs_rotate.sh
 bash runs_tucker.sh
 ```
 
-### We provide several variants of KG-FIT framework under the ```code``` folder:
+### We provide several variants of KG-FIT model under the ```code``` folder:
 
 | File                      | KG-FIT with KGE base models                     | Text and Hierarchical Constraints   | Text Embedding within Entity Embedding |
 |---------------------------|--------------------------------------------------|-------------------------------------|----------------------------------------|
