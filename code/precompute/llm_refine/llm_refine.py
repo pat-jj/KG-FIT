@@ -24,17 +24,15 @@ SPLIT_CLUSTER_PROMPT = '''Given entities from the cluster '{cluster_name}'.
 Analyze the entities and determine if they can be grouped into distinct and meaningful sub-clusters based on their characteristics, themes, or genres.
 If sub-clusters can be formed, provide a clear and concise name for each sub-cluster that represents the common attribute of its entities.
 Each sub-cluster should be given a new name that uniformly describes its entities. There needs to be differentiation in the names of different clusters.
-The number of sub-clusters is not fixed and should be controlled between 1 and 5.
+The number of sub-clusters should be two.
 If the entities are already well-grouped and don't require further sub-clustering, simply provide the original cluster.
 
 
 Provide the output in the following JSON format:
 ```json
 {{
-    "Sub-cluster Name": ["Entity 1", "Entity 2", ...],
-    "Sub-cluster Name": ["Entity 3", "Entity 4", ...],
-    "Sub-cluster Name": ["Entity 4", "Entity 5", ...],
-    ...
+    "Sub-cluster 1 Name": ["Entity 1", "Entity 2", ...],
+    "Sub-cluster 2 Name": ["Entity 3", "Entity 4", ...],
 }}
 ```
 
@@ -162,8 +160,7 @@ split_example_cluster_name = "Movies"
 split_example_entities = ', '.join(["The Godfather", "The Shawshank Redemption", "The Dark Knight", "Forrest Gump", "Inception", "The Matrix"])
 split_example_subclusters = json.dumps({
     "Drama": ["The Godfather", "The Shawshank Redemption", "Forrest Gump"],
-    "Action": ["The Dark Knight"],
-    "Science Fiction": ["Inception", "The Matrix"]
+    "Action": ["The Dark Knight", "Inception", "The Matrix"],
 })
 
 
@@ -249,7 +246,7 @@ def construct_bot_hierarchy(initial_hierarchy, model, seed):
             
             for name, entities in splitted_clusters.items():
                 current_full_cluster_id = 'Cluster_llm_bot_' + str(current_cluster_id)
-                root = {}
+                root.clear()
                 root[current_full_cluster_id] = entities
                 current_cluster_id += 1
                 recursion_construct_bot_hierarchy(root[current_full_cluster_id])
@@ -398,8 +395,8 @@ def reformat_hierarchy(initial_hierarchy):
 def llm_refine_hierarchical_knowledge(initial_hierarchy, dataset, model, seed):
     start_time = time.time()
 
-    # 1. construct hierarchical knowledge below the clusters (bottom hierarchical knowledge)
-    print('Constructing bottom hierarchy...')
+    # 1. construct hierarchical knowledge below the clusters (bot hierarchical knowledge)
+    print('Constructing bot hierarchy...')
     if os.path.exists(f'./outputs/{dataset}/step1_res.json'):
         with open(f'./outputs/{dataset}/step1_res.json') as f:
             tmp_hierarchy = json.load(f)
@@ -407,6 +404,7 @@ def llm_refine_hierarchical_knowledge(initial_hierarchy, dataset, model, seed):
         tmp_hierarchy = construct_bot_hierarchy(initial_hierarchy, model, seed)
         with open(f'./outputs/{dataset}/step1_res.json', 'w') as f:
             json.dump(tmp_hierarchy, f)
+    # tmp_hierarchy = initial_hierarchy
 
     phase1_end_time = time.time()
     phase1_time = (phase1_end_time - start_time) / 3600
