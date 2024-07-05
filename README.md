@@ -4,7 +4,7 @@
 
 ## Data Preparing & Precompute:
 
-To enalbe precompute, you need to put a file named "openai_api.key" (with your OpenAI API key in there) under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
+To enable precompute, you need to put a file named "openai_api.key" (with your OpenAI API key in there) under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
 ```bash
 cd code/precompute
 python cluster.py --dataset FB15K-237 --output_dir ../../processed_data  # precomputation for seed hierarchy
