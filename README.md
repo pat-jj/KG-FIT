@@ -45,7 +45,6 @@ bash runs_tucker.sh
   title = {KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge},
   author = {Jiang, Pengcheng and Cao, Lang and Xiao, Cao and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
   year = {2024},
-  primaryclass = {cs.LG},
   booktitle = {The Thirty-Eighth Annual Conference on Neural Information Processing Systems},
 }
 ```
