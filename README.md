@@ -1,10 +1,12 @@
-# Knowledge Graph Fine-Tuning with Open-World Entity Knowledge
+# KG-FIT
+
+This repository contains the code for the paper "KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge" (NeurIPS 2024). [Paper Link](https://arxiv.org/abs/2405.16412)
 
 ![alt text](/images/abstract.png "Overview of KG-FIT")
 
 ## Data Preparing & Precompute:
 
-To enalbe precompute, you need to put a file named "openai_api.key" (with your OpenAI API key in there) under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
+To enable precompute, you need to put a file named "openai_api.key" (with your OpenAI API key in there) under ```code/precompute```, then run the following command with a specified dataset (FB16K-237 in this case):
 ```bash
 cd code/precompute
 python cluster.py --dataset FB15K-237 --output_dir ../../processed_data  # precomputation for seed hierarchy
@@ -36,3 +38,16 @@ bash runs_tucker.sh
 | `model_p_anc.py`          | All models except TuckER and ConvE              | On both positive and negative batches | Frozen                               |
 | `model_tucker_conve.py`   | KG-FIT-TuckER and KG-FIT-ConvE                  | On both positive and negative batches | Frozen                               |
 
+
+## Cite KG-FIT
+```bibtex
+@inproceedings{jiang2024kgfit,
+  title = {KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge},
+  author = {Jiang, Pengcheng and Cao, Lang and Xiao, Cao and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
+  year = {2024},
+  primaryclass = {cs.LG},
+  booktitle = {The Thirty-Eighth Annual Conference on Neural Information Processing Systems},
+}
+```
+
+Thank you for your interest in our work!

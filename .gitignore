@@ -110,4 +110,5 @@ wandb/
 plot/
 baselines/
 vis/
+ttt_data/
 *.ipynb
