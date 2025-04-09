@@ -1,6 +1,6 @@
 # KG-FIT
 
-This repository contains the code for the paper "KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge" (NeurIPS 2024). [Paper Link]([https://arxiv.org/abs/2405.16412](https://proceedings.neurips.cc/paper_files/paper/2024/hash/f606d45ae7b991988b6eea2af38b7057-Abstract-Conference.html))
+This repository contains the code for the paper "KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge" (NeurIPS 2024). [Paper Link](https://proceedings.neurips.cc/paper_files/paper/2024/hash/f606d45ae7b991988b6eea2af38b7057-Abstract-Conference.html)
 
 ![alt text](/images/abstract.png "Overview of KG-FIT")
 
