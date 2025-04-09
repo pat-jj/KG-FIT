@@ -1,6 +1,6 @@
 # KG-FIT
 
-This repository contains the code for the paper "KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge" (NeurIPS 2024). [Paper Link](https://arxiv.org/abs/2405.16412)
+This repository contains the code for the paper "KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge" (NeurIPS 2024). [Paper Link]([https://arxiv.org/abs/2405.16412](https://proceedings.neurips.cc/paper_files/paper/2024/hash/f606d45ae7b991988b6eea2af38b7057-Abstract-Conference.html))
 
 ![alt text](/images/abstract.png "Overview of KG-FIT")
 
@@ -41,11 +41,16 @@ bash runs_tucker.sh
 
 ## Cite KG-FIT
 ```bibtex
-@inproceedings{jiang2024kgfit,
-  title = {KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge},
-  author = {Jiang, Pengcheng and Cao, Lang and Xiao, Cao and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
-  year = {2024},
-  booktitle = {The Thirty-Eighth Annual Conference on Neural Information Processing Systems},
+@inproceedings{NEURIPS2024_f606d45a,
+ author = {Jiang, Pengcheng and Cao, Lang and Xiao, Cao and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
+ booktitle = {Advances in Neural Information Processing Systems},
+ editor = {A. Globerson and L. Mackey and D. Belgrave and A. Fan and U. Paquet and J. Tomczak and C. Zhang},
+ pages = {136220--136258},
+ publisher = {Curran Associates, Inc.},
+ title = {KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge},
+ url = {https://proceedings.neurips.cc/paper_files/paper/2024/file/f606d45ae7b991988b6eea2af38b7057-Paper-Conference.pdf},
+ volume = {37},
+ year = {2024}
 }
 ```
 
