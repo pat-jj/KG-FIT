@@ -41,16 +41,13 @@ bash runs_tucker.sh
 
 ## Cite KG-FIT
 ```bibtex
-@inproceedings{NEURIPS2024_f606d45a,
- author = {Jiang, Pengcheng and Cao, Lang and Xiao, Cao and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
- booktitle = {Advances in Neural Information Processing Systems},
- editor = {A. Globerson and L. Mackey and D. Belgrave and A. Fan and U. Paquet and J. Tomczak and C. Zhang},
- pages = {136220--136258},
- publisher = {Curran Associates, Inc.},
- title = {KG-FIT: Knowledge Graph Fine-Tuning Upon Open-World Knowledge},
- url = {https://proceedings.neurips.cc/paper_files/paper/2024/file/f606d45ae7b991988b6eea2af38b7057-Paper-Conference.pdf},
- volume = {37},
- year = {2024}
+@article{jiang2024kg,
+  title={Kg-fit: Knowledge graph fine-tuning upon open-world knowledge},
+  author={Jiang, Pengcheng and Cao, Lang and Xiao, Cao Danica and Bhatia, Parminder and Sun, Jimeng and Han, Jiawei},
+  journal={Advances in Neural Information Processing Systems},
+  volume={37},
+  pages={136220--136258},
+  year={2024}
 }
 ```
 
